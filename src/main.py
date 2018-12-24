@@ -97,6 +97,11 @@ def dense_optical_flow(video_path):
     hsv[...,1] = 255
     while(1):
         ret, frame2 = cap.read()
+
+        if frame2 is None:
+            print("end of video")
+            break
+
         next = cv.cvtColor(frame2,cv.COLOR_BGR2GRAY)
         flow = cv.calcOpticalFlowFarneback(prvs,next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
         mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
