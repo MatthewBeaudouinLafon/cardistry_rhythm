@@ -1,3 +1,11 @@
+# Video folder
+video/
+
+# Dumb local stuff
+.DS_Store
+.vscode/
+
+## Github's carefully crafter gitignore for python
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
