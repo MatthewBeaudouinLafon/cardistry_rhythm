@@ -1,5 +1,6 @@
 # Video folder
 video/
+metrics/
 
 # Dumb local stuff
 .DS_Store

@@ -1,21 +1,41 @@
 import math
+import time
 import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
 
+def full_extent(ax, pad=0.0):
+    """
+    Get the full extent of an axes, including axes labels, tick labels, and
+    titles. From:
+    https://stackoverflow.com/questions/4325733/save-a-subplot-in-matplotlib
+    """
+    # For text objects, we need to draw the figure first, otherwise the extents
+    # are undefined.
+    ax.figure.canvas.draw()
+    items = ax.get_xticklabels() + ax.get_yticklabels() 
+    # items += [ax, ax.title, ax.xaxis.label, ax.yaxis.label]
+    items += [ax, ax.title]
+    bbox = Bbox.union([item.get_window_extent() for item in items])
+
+    return bbox.expanded(1.0 + pad, 1.0 + pad)
 class RhythmDetector(object):
     """
-
+    This class handles doing optical flow analysis on a video. It also plots
+    stuff. 
+    TODO: Think about how this class should be used and build it accordingly.
     """
 
-    def __init__(self, video_path):
-        self.video_path = video_path
+    def __init__(self, video_name, video_folder_path='video/'):
+        self.video_name = video_name
+        self.video_path = video_folder_path + video_name  # TODO: use proper python path merging
+        self.percentiles = range(25, 76, 25)
 
         plt.ion()
         self.fig, (self.ax_distribution, self.ax_metrics) = plt.subplots(nrows=2, ncols=1)
         self.metrics = {
             'average': [],
-            'percentiles': []
+            'percentiles': [[] for i in self.percentiles]
         }
 
     def dense_optical_flow(self):
@@ -23,6 +43,8 @@ class RhythmDetector(object):
         Calculates dense optical flow on video (ie does it on every pixel).
         Code taken from
             https://docs.opencv.org/3.4/d7/d8b/tutorial_py_lucas_kanade.html
+
+        TODO: Make flag for verbosity, calculating metrics, etc.
         """
         cap = cv.VideoCapture(self.video_path)
         total_frame_number = cap.get(cv.CAP_PROP_FRAME_COUNT)
@@ -66,6 +88,8 @@ class RhythmDetector(object):
 
             previous_bw = current_bw
 
+        self.save_metrics()  # TODO: Check if plots exist?
+
         cap.release()
         cv.destroyAllWindows()
 
@@ -77,12 +101,13 @@ class RhythmDetector(object):
         self.ax_distribution.set_ylim(0, 60000)
         self.ax_distribution.set_title('Distribution of pixel motion')
 
+        # Display motion metrics throughout the video
         self.ax_metrics.set_xlabel('time (frames)')
         self.ax_metrics.set_ylabel('metric')
         self.ax_metrics.set_xlim(0, total_frame_number)
         self.ax_metrics.set_ylim(0, 6)
+        self.ax_metrics.legend(loc='upper right')
 
-        # plt.show(block=False)
         self.fig.canvas.draw()
 
     def motion_metric(self, flow, frame_number, total_frame_number, verbose=False):
@@ -94,6 +119,7 @@ class RhythmDetector(object):
         between the current and the previous flow. This would show those sharp
         corners that function as beats.
         """
+        
         mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
         flat_mag = mag.flatten()
 
@@ -101,17 +127,39 @@ class RhythmDetector(object):
         self.ax_distribution.clear()
         n, bins, _ = self.ax_distribution.hist(x=flat_mag, bins=30)  # TODO: Don't be lazy and use a real histogram thing?
         
-        average_motion = np.mean(flat_mag)
-        percentiles = [np.percentile(flat_mag, p) for p in range(25, 75+1, 25)]  # 75+1 because range is exclusive 💅
-        self.metrics['average'].append(average_motion)
         self.ax_metrics.clear()
-        self.ax_metrics.plot(self.metrics['average'])
+
+        average_motion = np.mean(flat_mag)
+        self.metrics['average'].append(average_motion)
+        self.ax_metrics.plot(self.metrics['average'], label='average')
+
+        for index, percent in enumerate(self.percentiles):
+            percentile_motion = np.percentile(flat_mag, percent)
+            self.metrics['percentiles'][index].append(percentile_motion)  # TODO: generalize to more percentiles.
+            self.ax_metrics.plot(
+                self.metrics['percentiles'][index],
+                label='{}th percentile'.format(percent)
+            )
 
         if verbose:
             self.update_plots(total_frame_number)
+            print()
             print("average motion: {}".format(average_motion))
+            print("percentiles: {}th = {}, {}th = {}, {}th = {}".format(
+                self.percentiles[0], self.metrics['percentiles'][0][-1], 
+                self.percentiles[1], self.metrics['percentiles'][1][-1],
+                self.percentiles[2], self.metrics['percentiles'][2][-1]
+            ))
 
-        
+    def save_metrics(self):
+        """
+        Save metric graphs in metrics/ folder. Includes average, 25th, 50th
+        and 75th percentiles.
+        """
+        # extent = full_extent(self.ax_metrics).transformed(self.fig.dpi_scale_trans.inverted())
+        # Alternatively,
+        extent = self.ax_metrics.get_tightbbox(self.fig.canvas.renderer).transformed(self.fig.dpi_scale_trans.inverted())
+        self.fig.savefig('metrics/' + self.video_name[:-4] + '_metrics.png', bbox_inches=extent)
 
     def play_video(self):
         cap = cv.VideoCapture(self.video_path)
@@ -196,7 +244,9 @@ class RhythmDetector(object):
 
 
 if __name__ == "__main__":
-    rhy_det = RhythmDetector(video_path='video/whiplash.mov')
+    start = time.time()
+    rhy_det = RhythmDetector(video_name='whiplash.mov')
 
     # lk_optical_flow(VIDEO_PATH)
     rhy_det.dense_optical_flow()
+    print("Took {}seconds".format(time.time() - start))
