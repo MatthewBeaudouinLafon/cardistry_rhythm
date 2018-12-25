@@ -1,7 +1,43 @@
-import cv2 as cv
+import math
 import numpy as np
+import cv2 as cv
+import matplotlib.pyplot as plt
 
 VIDEO_PATH = 'video/whiplash.mov'
+
+def motion_metric(flow, verbose=False):
+    """
+    Calculate the motion metric from the flow. Currently does an average
+    magnitude.
+    TODO: Try doing a second derivative like thing by taking the difference
+    between the current and the previous flow. This would show those sharp
+    corners that function as beats.
+    """
+    # num_pixels = flow.shape[0] * flow.shape[1]
+    # flat_flow = np.reshape(flow, (num_pixels, 2))
+    
+    # total_magnitude = 0
+    # for vector in flat_flow:
+    #     total_magnitude += math.sqrt(vector[0]**2 + vector[1]**2)
+
+    # motion = total_magnitude / len(flat_flow)
+    
+    mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
+    flat_mag = mag.flatten()
+    if verbose:
+        # Display pixel motion distribution histogram
+        plt.clf()
+        n, bins, patches = plt.hist(x=flat_mag, bins=30)
+        plt.xlabel('Motion')
+        plt.ylabel('Frequency')
+        plt.xlim(0, 100)
+        plt.ylim(0, 60000)
+        plt.title('Distribution of pixel motion')
+        plt.show(block=False)
+
+        print("average motion: {}".format(sum(flat_mag) / len(flat_mag)))
+
+    
 
 def play_video(video_path):
     cap = cv.VideoCapture(video_path)
@@ -91,34 +127,47 @@ def dense_optical_flow(video_path):
         https://docs.opencv.org/3.4/d7/d8b/tutorial_py_lucas_kanade.html
     """
     cap = cv.VideoCapture(video_path)
-    ret, frame1 = cap.read()
-    prvs = cv.cvtColor(frame1,cv.COLOR_BGR2GRAY)
-    hsv = np.zeros_like(frame1)
+    ret, frame = cap.read()
+    previous_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
+    hsv = np.zeros_like(frame)
     hsv[...,1] = 255
-    while(1):
-        ret, frame2 = cap.read()
 
-        if frame2 is None:
+    while(True):
+        ret, frame = cap.read()
+
+        if frame is None:
             print("end of video")
             break
 
-        next = cv.cvtColor(frame2,cv.COLOR_BGR2GRAY)
-        flow = cv.calcOpticalFlowFarneback(prvs,next, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        # Calculate flow
+        current_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
+        flow = cv.calcOpticalFlowFarneback(previous_bw, current_bw, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+
+        motion_metric(flow, verbose=True)
+
+        # Make color viz
         mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
         hsv[...,0] = ang*180/np.pi/2
         hsv[...,2] = cv.normalize(mag,None,0,255,cv.NORM_MINMAX)
         bgr = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
-        cv.imshow('frame2',bgr)
+        cv.imshow('frame',bgr)
+
+        # Interpret keyboard
         k = cv.waitKey(30) & 0xff
         if k == 27:
+            print("User stopped")
             break
         elif k == ord('s'):
-            cv.imwrite('opticalfb.png',frame2)
+            cv.imwrite('opticalfb.png',frame)
             cv.imwrite('opticalhsv.png',bgr)
-        prvs = next
+
+        previous_bw = current_bw
+
     cap.release()
     cv.destroyAllWindows()
 
 if __name__ == "__main__":
+    plt.ion()
+
     # lk_optical_flow(VIDEO_PATH)
     dense_optical_flow(VIDEO_PATH)
