@@ -7,7 +7,8 @@ VIDEO_PATH = 'video/whiplash.mov'
 
 def motion_metric(flow, verbose=False):
     """
-    Calculate the motion metric from the flow. Currently does an average
+    Calculate the motion metric from the flow. Currently includes per frame
+    - an average
     magnitude.
     TODO: Try doing a second derivative like thing by taking the difference
     between the current and the previous flow. This would show those sharp
@@ -24,10 +25,15 @@ def motion_metric(flow, verbose=False):
     
     mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
     flat_mag = mag.flatten()
+
+    # Compute metrics
+    plt.clf()
+    n, bins, _ = plt.hist(x=flat_mag, bins=30)  # TODO: Don't be lazy and use a real histogram thing?
+    average_motion = np.mean(flat_mag)
+    percentiles = [np.percentile(flat_mag, p) for p in range(25, 75+1, 25)]  # 75+1 because range is exclusive 💅
+
     if verbose:
         # Display pixel motion distribution histogram
-        plt.clf()
-        n, bins, patches = plt.hist(x=flat_mag, bins=30)
         plt.xlabel('Motion')
         plt.ylabel('Frequency')
         plt.xlim(0, 100)
@@ -35,7 +41,9 @@ def motion_metric(flow, verbose=False):
         plt.title('Distribution of pixel motion')
         plt.show(block=False)
 
-        print("average motion: {}".format(sum(flat_mag) / len(flat_mag)))
+        print("average motion: {}".format(average_motion))
+
+    
 
     
 
@@ -49,7 +57,7 @@ def play_video(video_path):
             print("end of video")
             break
 
-        cv.imshow('frame', frame)  # TODO: Probably should check frame size on video end so it doesn't exit with an error
+        cv.imshow('frame', frame)
         if cv.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -139,18 +147,21 @@ def dense_optical_flow(video_path):
             print("end of video")
             break
 
+        # Show frame in one window
+        cv.imshow('frame', frame)
+
         # Calculate flow
         current_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
         flow = cv.calcOpticalFlowFarneback(previous_bw, current_bw, None, 0.5, 3, 15, 3, 5, 1.2, 0)
 
         motion_metric(flow, verbose=True)
 
-        # Make color viz
+        # Make color viz in another window
         mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
         hsv[...,0] = ang*180/np.pi/2
         hsv[...,2] = cv.normalize(mag,None,0,255,cv.NORM_MINMAX)
         bgr = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
-        cv.imshow('frame',bgr)
+        cv.imshow('flow',bgr)
 
         # Interpret keyboard
         k = cv.waitKey(30) & 0xff
