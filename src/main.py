@@ -3,6 +3,7 @@ import time
 import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
+from matplotlib.transforms import Bbox
 
 def full_extent(ax, pad=0.0):
     """
@@ -35,7 +36,8 @@ class RhythmDetector(object):
         self.fig, (self.ax_distribution, self.ax_metrics) = plt.subplots(nrows=2, ncols=1)
         self.metrics = {
             'average': [],
-            'percentiles': [[] for i in self.percentiles]
+            'percentiles': [[] for i in self.percentiles],
+            'exponential_fit': []
         }
 
     def dense_optical_flow(self):
@@ -52,6 +54,13 @@ class RhythmDetector(object):
         previous_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
         hsv = np.zeros_like(frame)
         hsv[...,1] = 255
+
+        output = cv.VideoWriter(
+            'result/' + self.video_name[:-4] +'_viz.mov',  # TODO: Better path join
+            int(cap.get(cv.CAP_PROP_FOURCC)),
+            cap.get(cv.CAP_PROP_FPS),
+            (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT)))
+        )  #filename, fourcc, fps, frameSize
 
         while(True):
             ret, frame = cap.read()
@@ -72,10 +81,16 @@ class RhythmDetector(object):
 
             # Make color viz in another window
             mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
-            hsv[...,0] = ang*180/np.pi/2
+            # hsv[...,0] = ang*180/np.pi/2
             hsv[...,2] = cv.normalize(mag,None,0,255,cv.NORM_MINMAX)
             bgr = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
+
+            # cv.circle(img=bgr, center=(70,70), radius=100, color=(0, 0, 255), thickness=-1)
+            cv.circle(img=bgr, center=(70,70), radius=int(100*self.metrics['percentiles'][1][-1]),color=(0, 0, 255),thickness=-1)            
+            # cv.circle(img, center, radius, color[, thickness[, lineType[, shift]]])
+
             cv.imshow('flow',bgr)
+            output.write(bgr)
 
             # Interpret keyboard
             k = cv.waitKey(30) & 0xff
@@ -125,13 +140,15 @@ class RhythmDetector(object):
 
         # Compute metrics
         self.ax_distribution.clear()
-        n, bins, _ = self.ax_distribution.hist(x=flat_mag, bins=30)  # TODO: Don't be lazy and use a real histogram thing?
+        n, bins, _ = self.ax_distribution.hist(x=flat_mag, bins=30, log=True)  # TODO: Don't be lazy and use a real histogram thing?
         
         self.ax_metrics.clear()
 
         average_motion = np.mean(flat_mag)
         self.metrics['average'].append(average_motion)
         self.ax_metrics.plot(self.metrics['average'], label='average')
+
+        # A, B = np.polyfit(x, numpy.log(y), 1, w=numpy.sqrt(y))
 
         for index, percent in enumerate(self.percentiles):
             percentile_motion = np.percentile(flat_mag, percent)
