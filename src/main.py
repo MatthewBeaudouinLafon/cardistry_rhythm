@@ -20,11 +20,20 @@ def full_extent(ax, pad=0.0):
     bbox = Bbox.union([item.get_window_extent() for item in items])
 
     return bbox.expanded(1.0 + pad, 1.0 + pad)
+
+
 class RhythmDetector(object):
     """
     This class handles doing optical flow analysis on a video. It also plots
     stuff. 
-    TODO: Think about how this class should be used and build it accordingly.
+
+    Usage:
+    >>> rhythm = RhythmDetector(video_name='sybil_cut.mov')
+
+    >>> rhythm.analyze(method='dense_optical_flow', verbose=True, metrics=[average, percentiles, second_div])
+    [=======================] 100%
+
+    >>> rhythm.play()
     """
 
     def __init__(self, video_name, video_folder_path='video/'):
@@ -34,63 +43,106 @@ class RhythmDetector(object):
 
         plt.ion()
         self.fig, (self.ax_distribution, self.ax_metrics) = plt.subplots(nrows=2, ncols=1)
-        self.metrics = {
-            'average': [],
-            'percentiles': [[] for i in self.percentiles],
-            'exponential_fit': []
-        }
+        self.metrics = {}
+        # when computed, depending on what's passed:
+        # {
+        #     'average': [],
+        #     'percentiles': [[] for i in self.percentiles]
+        # }
 
-    def dense_optical_flow(self):
+    def has_computed_metric(self, metric_name):
+        """
+        Returns whether a metric has been computed.
+        """
+        return self.metrics.get(metric_name, None) is not None
+
+    def analyze(self,
+        method='dense_optical_flow',
+        chosen_metrics=['percentiles', 'average'],
+        show_viz=True,
+        verbose=True,
+        save_all=True):
+        """
+        Run video analysis.
+        Inputs:
+            method(string): one of 'dense_optical_flow'
+            chosen_metrics ([string]) : array of strings featuring 'percentiles', 'average']
+            show_viz (bool)           : Show visualizations while running .
+            verbose (bool)            : Print metrics.
+            save_all (bool)           : Save metrics, plots, and viz if enabled. 
+        """
+        if method == 'dense_optical_flow':
+            print("Analyzing using Optical Flow")
+            self.dense_optical_flow(
+                chosen_metrics=chosen_metrics,
+                show_viz=show_viz,
+                verbose=verbose,
+                save_all=save_all)
+        else:
+            print('Method "{}" unknown.'.format(method))
+            return None
+
+    def dense_optical_flow(self,
+        chosen_metrics=['percentiles', 'average'],
+        show_viz=True,
+        verbose=True,
+        save_all=True):
         """
         Calculates dense optical flow on video (ie does it on every pixel).
         Code taken from
             https://docs.opencv.org/3.4/d7/d8b/tutorial_py_lucas_kanade.html
-
-        TODO: Make flag for verbosity, calculating metrics, etc.
         """
+
         cap = cv.VideoCapture(self.video_path)
         total_frame_number = cap.get(cv.CAP_PROP_FRAME_COUNT)
-        ret, frame = cap.read()
+        _, frame = cap.read()
         previous_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
         hsv = np.zeros_like(frame)
         hsv[...,1] = 255
 
-        output = cv.VideoWriter(
-            'result/' + self.video_name[:-4] +'_viz.mov',  # TODO: Better path join
-            int(cap.get(cv.CAP_PROP_FOURCC)),
-            cap.get(cv.CAP_PROP_FPS),
-            (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT)))
-        )  #filename, fourcc, fps, frameSize
+        if save_all:
+            output = cv.VideoWriter(
+                'result/' + self.video_name[:-4] +'_viz.mov',  # TODO: Better path join
+                int(cap.get(cv.CAP_PROP_FOURCC)),
+                cap.get(cv.CAP_PROP_FPS),
+                (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT)))
+            )  # filename, fourcc, fps, frameSize
 
-        while(True):
-            ret, frame = cap.read()
-            frame_number = cap.get(cv.CAP_PROP_POS_FRAMES)
+        while(True):  # frame goes None when video stops
+            _, frame = cap.read()
+            # frame_number = cap.get(cv.CAP_PROP_POS_FRAMES)
 
             if frame is None:
                 print("end of video")
                 break
 
-            # Show frame in one window
-            cv.imshow('frame', frame)
-
             # Calculate flow
             current_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
             flow = cv.calcOpticalFlowFarneback(previous_bw, current_bw, None, 0.5, 3, 15, 3, 5, 1.2, 0)
 
-            self.motion_metric(flow, frame_number, total_frame_number, verbose=True)
+            # Compute Metics - updates self.metrics
+            self.compute_metric(flow, chosen_metrics, verbose=verbose)
 
-            # Make color viz in another window
-            mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
-            # hsv[...,0] = ang*180/np.pi/2
-            hsv[...,2] = cv.normalize(mag,None,0,255,cv.NORM_MINMAX)
-            bgr = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
+            if show_viz:
+                # Plot metrics
+                self.plot_metrics(chosen_metrics, total_frame_number, flow=flow)
 
-            # cv.circle(img=bgr, center=(70,70), radius=100, color=(0, 0, 255), thickness=-1)
-            cv.circle(img=bgr, center=(70,70), radius=int(100*self.metrics['percentiles'][1][-1]),color=(0, 0, 255),thickness=-1)            
-            # cv.circle(img, center, radius, color[, thickness[, lineType[, shift]]])
+                # Make color viz in another window
+                mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
+                hsv[...,0] = ang*180/np.pi/2
+                hsv[...,2] = cv.normalize(mag,None,0,255,cv.NORM_MINMAX)
+                bgr = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
 
-            cv.imshow('flow',bgr)
-            output.write(bgr)
+                # cv.circle(img=bgr, center=(70,70), radius=100, color=(0, 0, 255), thickness=-1)
+                cv.circle(img=bgr, center=(70,70), radius=int(100*self.metrics['percentiles'][1][-1]),color=(0, 0, 255),thickness=-1)            
+                # cv.circle(img, center, radius, color[, thickness[, lineType[, shift]]])
+
+                # Show frame in one window
+                cv.imshow('frame', frame)
+                cv.imshow('flow',bgr)
+
+                if save_all:
+                    output.write(bgr)
 
             # Interpret keyboard
             k = cv.waitKey(30) & 0xff
@@ -103,17 +155,90 @@ class RhythmDetector(object):
 
             previous_bw = current_bw
 
-        self.save_metrics()  # TODO: Check if plots exist?
+        if save_all:
+            self.save_plots()  # TODO: Check if plots exist?
 
         cap.release()
         cv.destroyAllWindows()
+
+    def compute_metric(self, flow, chosen_metrics, verbose=True):
+        """
+        Calculate the motion metric from the flow. Currently includes per frame
+        - an average
+        magnitude.
+        TODO: Try doing a second derivative like thing by taking the difference
+        between the current and the previous flow. This would show those sharp
+        corners that function as beats.
+        """
+        console_output = '\n'
+        
+        mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
+        flat_mag = mag.flatten()
+        
+        # Average flow magnitude
+        if 'average' in chosen_metrics:
+            average_motion = np.mean(flat_mag)
+            self.metrics['average'] = self.metrics.get('average', []) + [average_motion]
+            console_output += "\naverage motion: {:.4f}".format(average_motion)
+
+        # Different percentiles of flow magnitude frequency
+        if 'percentiles' in chosen_metrics:
+            if self.metrics.get('percentiles') is None:
+                self.metrics['percentiles'] = [[] for i in self.percentiles]
+
+            for index, percent in enumerate(self.percentiles):
+                percentile_motion = np.percentile(flat_mag, percent)
+                self.metrics['percentiles'][index].append(percentile_motion)  # TODO: generalize to more percentiles.
+
+            console_output += "\npercentiles: {}th = {:.4f}, {}th = {:.4f}, {}th = {:.4f}".format(
+                self.percentiles[0], self.metrics['percentiles'][0][-1], 
+                self.percentiles[1], self.metrics['percentiles'][1][-1],
+                self.percentiles[2], self.metrics['percentiles'][2][-1]
+            )
+
+        # TODO: Fit line to histogram
+        # A, B = np.polyfit(x, numpy.log(y), 1, w=numpy.sqrt(y))
+
+        if verbose:
+            # Build the string to print once so the console doesn't go nuts
+            print(console_output)
+            
+    def plot_metrics(self, chosen_metrics, total_frame_number, flow=None):
+        """
+        Plots computed metrics.
+
+        # TODO: Plot all computed metrics by looping through keys?
+        """
+        self.ax_metrics.clear()
+        if 'average' in chosen_metrics:
+            if self.metrics.get('average') is None or self.metrics.get('average') == []:
+                print('Metric "average" not computed')
+
+            self.ax_metrics.plot(self.metrics['average'], label='average')
+
+        if 'percentiles' in chosen_metrics:
+            if self.metrics.get('percentiles') is None or self.metrics.get('percentiles') == []:
+                print('Metric "percentiles" not computed')
+
+            for index, percent in enumerate(self.percentiles):
+                self.ax_metrics.plot(
+                    self.metrics['percentiles'][index],
+                    label='{}th percentile'.format(percent)
+                )
+
+        if flow is not None:
+            self.ax_distribution.clear()
+            mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
+            _, _, _ = self.ax_distribution.hist(x=mag.flatten(), bins=30, log=True)  # TODO: Don't be lazy and use a real histogram thing?
+        
+        self.update_plots(total_frame_number)
 
     def update_plots(self, total_frame_number):
         # Display pixel motion distribution histogram
         self.ax_distribution.set_xlabel('Motion')
         self.ax_distribution.set_ylabel('Frequency')
         self.ax_distribution.set_xlim(0, 100)  # TODO: no magic numbers
-        self.ax_distribution.set_ylim(0, 60000)
+        self.ax_distribution.set_ylim(10, 60000)
         self.ax_distribution.set_title('Distribution of pixel motion')
 
         # Display motion metrics throughout the video
@@ -125,56 +250,11 @@ class RhythmDetector(object):
 
         self.fig.canvas.draw()
 
-    def motion_metric(self, flow, frame_number, total_frame_number, verbose=False):
-        """
-        Calculate the motion metric from the flow. Currently includes per frame
-        - an average
-        magnitude.
-        TODO: Try doing a second derivative like thing by taking the difference
-        between the current and the previous flow. This would show those sharp
-        corners that function as beats.
-        """
-        
-        mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
-        flat_mag = mag.flatten()
-
-        # Compute metrics
-        self.ax_distribution.clear()
-        n, bins, _ = self.ax_distribution.hist(x=flat_mag, bins=30, log=True)  # TODO: Don't be lazy and use a real histogram thing?
-        
-        self.ax_metrics.clear()
-
-        average_motion = np.mean(flat_mag)
-        self.metrics['average'].append(average_motion)
-        self.ax_metrics.plot(self.metrics['average'], label='average')
-
-        # A, B = np.polyfit(x, numpy.log(y), 1, w=numpy.sqrt(y))
-
-        for index, percent in enumerate(self.percentiles):
-            percentile_motion = np.percentile(flat_mag, percent)
-            self.metrics['percentiles'][index].append(percentile_motion)  # TODO: generalize to more percentiles.
-            self.ax_metrics.plot(
-                self.metrics['percentiles'][index],
-                label='{}th percentile'.format(percent)
-            )
-
-        if verbose:
-            self.update_plots(total_frame_number)
-            print()
-            print("average motion: {}".format(average_motion))
-            print("percentiles: {}th = {}, {}th = {}, {}th = {}".format(
-                self.percentiles[0], self.metrics['percentiles'][0][-1], 
-                self.percentiles[1], self.metrics['percentiles'][1][-1],
-                self.percentiles[2], self.metrics['percentiles'][2][-1]
-            ))
-
-    def save_metrics(self):
+    def save_plots(self):
         """
         Save metric graphs in metrics/ folder. Includes average, 25th, 50th
         and 75th percentiles.
         """
-        # extent = full_extent(self.ax_metrics).transformed(self.fig.dpi_scale_trans.inverted())
-        # Alternatively,
         extent = self.ax_metrics.get_tightbbox(self.fig.canvas.renderer).transformed(self.fig.dpi_scale_trans.inverted())
         self.fig.savefig('metrics/' + self.video_name[:-4] + '_metrics.png', bbox_inches=extent)
 
@@ -265,5 +345,5 @@ if __name__ == "__main__":
     rhy_det = RhythmDetector(video_name='whiplash.mov')
 
     # lk_optical_flow(VIDEO_PATH)
-    rhy_det.dense_optical_flow()
+    rhy_det.analyze()
     print("Took {}seconds".format(time.time() - start))
