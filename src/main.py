@@ -42,7 +42,7 @@ class RhythmDetector(object):
         self.percentiles = range(25, 76, 25)
 
         plt.ion()
-        self.fig, (self.ax_distribution, self.ax_metrics) = plt.subplots(nrows=2, ncols=1)
+        self.fig, (self.ax_mag_distribution, self.ax_ang_distribution, self.ax_metrics) = plt.subplots(nrows=3, ncols=1)
         self.metrics = {}
         # when computed, depending on what's passed:
         # {
@@ -101,11 +101,19 @@ class RhythmDetector(object):
         hsv[...,1] = 255
 
         if save_all:
-            output = cv.VideoWriter(
+            viz_video_out = cv.VideoWriter(
                 'result/' + self.video_name[:-4] +'_viz.mov',  # TODO: Better path join
                 int(cap.get(cv.CAP_PROP_FOURCC)),
                 cap.get(cv.CAP_PROP_FPS),
                 (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT)))
+            )  # filename, fourcc, fps, frameSize
+
+            plot_width, plot_height = self.fig.get_size_inches()*self.fig.dpi
+            plot_video_out = cv.VideoWriter(
+                'result/' + self.video_name[:-4] +'_plot.mov',  # TODO: Better path join
+                cv.cv.CV_FOURCC('m', 'p', '4', 'v'),
+                cap.get(cv.CAP_PROP_FPS),
+                (int(plot_width), int(plot_height))
             )  # filename, fourcc, fps, frameSize
 
         while(True):  # frame goes None when video stops
@@ -142,7 +150,12 @@ class RhythmDetector(object):
                 cv.imshow('flow',bgr)
 
                 if save_all:
-                    output.write(bgr)
+                    viz_video_out.write(bgr)
+
+                    # Convert plot image to np array to save with opencv TODO: wtf is this seriously the best way to do this
+                    plot_image_array = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+                    plot_image_array = plot_image_array.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
+                    plot_video_out.write(plot_image_array)
 
             # Interpret keyboard
             k = cv.waitKey(30) & 0xff
@@ -156,8 +169,10 @@ class RhythmDetector(object):
             previous_bw = current_bw
 
         if save_all:
-            self.save_plots()  # TODO: Check if plots exist?
+            self.save_final_plots()  # TODO: Check if plots exist?
 
+        viz_video_out.release()
+        plot_video_out.release()
         cap.release()
         cv.destroyAllWindows()
 
@@ -227,19 +242,28 @@ class RhythmDetector(object):
                 )
 
         if flow is not None:
-            self.ax_distribution.clear()
+            self.ax_mag_distribution.clear()
+            self.ax_ang_distribution.clear()
             mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
-            _, _, _ = self.ax_distribution.hist(x=mag.flatten(), bins=30, log=True)  # TODO: Don't be lazy and use a real histogram thing?
-        
+            _, _, _ = self.ax_mag_distribution.hist(x=mag.flatten(), bins=30, log=True)
+            _, _, _ = self.ax_ang_distribution.hist(x=ang.flatten(), bins=30)
+
         self.update_plots(total_frame_number)
 
     def update_plots(self, total_frame_number):
-        # Display pixel motion distribution histogram
-        self.ax_distribution.set_xlabel('Motion')
-        self.ax_distribution.set_ylabel('Frequency')
-        self.ax_distribution.set_xlim(0, 100)  # TODO: no magic numbers
-        self.ax_distribution.set_ylim(10, 60000)
-        self.ax_distribution.set_title('Distribution of pixel motion')
+        # Display the magnitude pixel motion in a histogram
+        self.ax_mag_distribution.set_xlabel('Motion Magnitude')
+        self.ax_mag_distribution.set_ylabel('Frequency')
+        self.ax_mag_distribution.set_xlim(0, 100)  # TODO: no magic numbers
+        self.ax_mag_distribution.set_ylim(10, 60000)
+        self.ax_mag_distribution.set_title('Distribution of pixel motion')
+
+        # Display the magnitude pixel motion in a histogram
+        self.ax_ang_distribution.set_xlabel('Motion Angle')
+        self.ax_ang_distribution.set_ylabel('Frequency')
+        self.ax_ang_distribution.set_xlim(0, 2*np.pi)  # TODO: no magic numbers
+        self.ax_ang_distribution.set_ylim(10, 60000)
+        self.ax_ang_distribution.set_title('Distribution of pixel motion')
 
         # Display motion metrics throughout the video
         self.ax_metrics.set_xlabel('time (frames)')
@@ -250,13 +274,13 @@ class RhythmDetector(object):
 
         self.fig.canvas.draw()
 
-    def save_plots(self):
+    def save_final_plots(self):
         """
-        Save metric graphs in metrics/ folder. Includes average, 25th, 50th
+        Save metric graphs in result/ folder. Includes average, 25th, 50th
         and 75th percentiles.
         """
         extent = self.ax_metrics.get_tightbbox(self.fig.canvas.renderer).transformed(self.fig.dpi_scale_trans.inverted())
-        self.fig.savefig('metrics/' + self.video_name[:-4] + '_metrics.png', bbox_inches=extent)
+        self.fig.savefig('result/' + self.video_name[:-4] + '_metrics.png', bbox_inches=extent)
 
     def play_video(self):
         cap = cv.VideoCapture(self.video_path)
@@ -342,7 +366,7 @@ class RhythmDetector(object):
 
 if __name__ == "__main__":
     start = time.time()
-    rhy_det = RhythmDetector(video_name='whiplash.mov')
+    rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
 
     # lk_optical_flow(VIDEO_PATH)
     rhy_det.analyze()
