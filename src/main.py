@@ -33,7 +33,7 @@ class RhythmDetector(object):
     >>> rhythm.analyze(method='dense_optical_flow', verbose=True, metrics=[average, percentiles, second_div])
     [=======================] 100%
 
-    >>> rhythm.play()
+    >>> rhythm.play()  # TODO: Implement
     """
 
     def __init__(self, video_name, video_folder_path='video/'):
@@ -42,7 +42,8 @@ class RhythmDetector(object):
         self.percentiles = range(25, 76, 25)
 
         plt.ion()
-        self.fig, (self.ax_mag_distribution, self.ax_ang_distribution, self.ax_metrics) = plt.subplots(nrows=3, ncols=1)
+        self.fig, (self.ax_mag_distribution, self.ax_ang_distribution, self.ax_metrics) = \
+            plt.subplots(nrows=3, ncols=1)
         self.metrics = {}
         # when computed, depending on what's passed:
         # {
@@ -108,12 +109,17 @@ class RhythmDetector(object):
                 (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT)))
             )  # filename, fourcc, fps, frameSize
 
+            self.update_plots(total_frame_number)
             plot_width, plot_height = self.fig.get_size_inches()*self.fig.dpi
+            print("plot_width, plot_height = {}, {}".format(plot_width, plot_height))
+            # plot_width, plot_height = 1280, 960
+
             plot_video_out = cv.VideoWriter(
                 'result/' + self.video_name[:-4] +'_plot.mov',  # TODO: Better path join
-                cv.cv.CV_FOURCC('m', 'p', '4', 'v'),
+                cv.VideoWriter.fourcc('m','p','4','v'),
                 cap.get(cv.CAP_PROP_FPS),
-                (int(plot_width), int(plot_height))
+                (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT)))
+                # (int(plot_width), int(plot_height))
             )  # filename, fourcc, fps, frameSize
 
         while(True):  # frame goes None when video stops
@@ -147,7 +153,7 @@ class RhythmDetector(object):
 
                 # Show frame in one window
                 cv.imshow('frame', frame)
-                cv.imshow('flow',bgr)
+                cv.imshow('flow', bgr)
 
                 if save_all:
                     viz_video_out.write(bgr)
@@ -155,7 +161,11 @@ class RhythmDetector(object):
                     # Convert plot image to np array to save with opencv TODO: wtf is this seriously the best way to do this
                     plot_image_array = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
                     plot_image_array = plot_image_array.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
-                    plot_video_out.write(plot_image_array)
+
+                    plot_image_array = cv.resize(plot_image_array, (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))))
+                    plot_video_out.write(cv.cvtColor(plot_image_array, cv.COLOR_RGB2BGR)) # plot_image_array)
+
+                    print("plot_image_array.shape = {}".format(plot_image_array.shape))
 
             # Interpret keyboard
             k = cv.waitKey(30) & 0xff
