@@ -42,13 +42,15 @@ class RhythmDetector(object):
         self.percentiles = range(25, 76, 25)
 
         plt.ion()
+        # TODO: Make figure size the same aspect ratio as the video?
         self.fig, (self.ax_mag_distribution, self.ax_ang_distribution, self.ax_metrics) = \
             plt.subplots(nrows=3, ncols=1)
         self.metrics = {}
         # when computed, depending on what's passed:
         # {
-        #     'average': [],
-        #     'percentiles': [[] for i in self.percentiles]
+        #     'magnitude_average': [],
+        #     'magnitude_percentiles': [[] for i in self.percentiles],
+        #     'angle_max: []
         # }
 
     def has_computed_metric(self, metric_name):
@@ -59,7 +61,7 @@ class RhythmDetector(object):
 
     def analyze(self,
         method='dense_optical_flow',
-        chosen_metrics=['percentiles', 'average'],
+        chosen_metrics=['magnitude_percentiles', 'magnitude_average'],
         show_viz=True,
         verbose=True,
         save_all=True):
@@ -67,7 +69,7 @@ class RhythmDetector(object):
         Run video analysis.
         Inputs:
             method(string): one of 'dense_optical_flow'
-            chosen_metrics ([string]) : array of strings featuring 'percentiles', 'average']
+            chosen_metrics ([string]) : array of strings featuring 'magnitude_percentiles', 'magnitude_average']
             show_viz (bool)           : Show visualizations while running .
             verbose (bool)            : Print metrics.
             save_all (bool)           : Save metrics, plots, and viz if enabled. 
@@ -84,7 +86,7 @@ class RhythmDetector(object):
             return None
 
     def dense_optical_flow(self,
-        chosen_metrics=['percentiles', 'average'],
+        chosen_metrics=['magnitude_percentiles', 'magnitude_average'],
         show_viz=True,
         verbose=True,
         save_all=True):
@@ -102,24 +104,11 @@ class RhythmDetector(object):
         hsv[...,1] = 255
 
         if save_all:
-            viz_video_out = cv.VideoWriter(
-                'result/' + self.video_name[:-4] +'_viz.mov',  # TODO: Better path join
-                int(cap.get(cv.CAP_PROP_FOURCC)),
-                cap.get(cv.CAP_PROP_FPS),
-                (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT)))
-            )  # filename, fourcc, fps, frameSize
-
-            self.update_plots(total_frame_number)
-            plot_width, plot_height = self.fig.get_size_inches()*self.fig.dpi
-            print("plot_width, plot_height = {}, {}".format(plot_width, plot_height))
-            # plot_width, plot_height = 1280, 960
-
-            plot_video_out = cv.VideoWriter(
-                'result/' + self.video_name[:-4] +'_plot.mov',  # TODO: Better path join
+            full_video_out = cv.VideoWriter(
+                'result/' + self.video_name[:-4] +'_analysis.mov',  # TODO: Better path join
                 cv.VideoWriter.fourcc('m','p','4','v'),
                 cap.get(cv.CAP_PROP_FPS),
-                (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT)))
-                # (int(plot_width), int(plot_height))
+                (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), 2*int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))) # times 2 to hold the plot as well. TODO: Generalize
             )  # filename, fourcc, fps, frameSize
 
         while(True):  # frame goes None when video stops
@@ -144,28 +133,38 @@ class RhythmDetector(object):
                 # Make color viz in another window
                 mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
                 hsv[...,0] = ang*180/np.pi/2
-                hsv[...,2] = cv.normalize(mag,None,0,255,cv.NORM_MINMAX)
-                bgr = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
+                hsv[...,2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)
+                viz_image = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
 
-                # cv.circle(img=bgr, center=(70,70), radius=100, color=(0, 0, 255), thickness=-1)
-                cv.circle(img=bgr, center=(70,70), radius=int(100*self.metrics['percentiles'][1][-1]),color=(0, 0, 255),thickness=-1)            
+                # Average the flow vectors
+                net_vector = np.sum(np.sum(flow, axis=0), axis=0) / np.size(flow)
+                net_vector_mag, net_vector_ang = cv.cartToPolar(float(net_vector[0]), float(net_vector[1]))
+
+                # Draw magnitude and angle vizualizer
+                diagram_center = (70,70)
+                arrow_length = 50
+                disp_angle = net_vector_ang[0]  # Why does cartToPolar spit out [value, 0, 0, 0]? Beats me.
+                print("disp_angle = {}".format(disp_angle))
+                arrow_head = (int(diagram_center[0] + arrow_length * math.cos(disp_angle)), int(diagram_center[1] + arrow_length * math.sin(disp_angle)))
+                # cv.circle(img=viz_image, center=(70,70), radius=100, color=(0, 0, 255), thickness=-1)
+                cv.circle(img=viz_image, center=diagram_center, radius=int(100*net_vector_mag[0]),color=(0, 0, 255),thickness=-1)            
                 # cv.circle(img, center, radius, color[, thickness[, lineType[, shift]]])
+                cv.arrowedLine(viz_image, diagram_center, arrow_head, thickness=2, color=(255,255,255))
 
                 # Show frame in one window
                 cv.imshow('frame', frame)
-                cv.imshow('flow', bgr)
+                cv.imshow('flow', viz_image)
 
                 if save_all:
-                    viz_video_out.write(bgr)
-
                     # Convert plot image to np array to save with opencv TODO: wtf is this seriously the best way to do this
                     plot_image_array = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
                     plot_image_array = plot_image_array.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
 
+                    # Resize the raster image of the plot *gag* TODO: Do this in a gag-less way. 
                     plot_image_array = cv.resize(plot_image_array, (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))))
-                    plot_video_out.write(cv.cvtColor(plot_image_array, cv.COLOR_RGB2BGR)) # plot_image_array)
-
-                    print("plot_image_array.shape = {}".format(plot_image_array.shape))
+                    plot_image_array = cv.cvtColor(plot_image_array, cv.COLOR_RGB2BGR)
+                    
+                    full_video_out.write(np.concatenate((viz_image, plot_image_array), axis=0))
 
             # Interpret keyboard
             k = cv.waitKey(30) & 0xff
@@ -173,16 +172,14 @@ class RhythmDetector(object):
                 print("User stopped")
                 break
             elif k == ord('s'):
-                cv.imwrite('opticalfb.png',frame)
-                cv.imwrite('opticalhsv.png',bgr)
+                cv.imwrite('opticalfb.png', frame)
+                cv.imwrite('opticalhsv.png', viz_image)
 
             previous_bw = current_bw
 
         if save_all:
             self.save_final_plots()  # TODO: Check if plots exist?
 
-        viz_video_out.release()
-        plot_video_out.release()
         cap.release()
         cv.destroyAllWindows()
 
@@ -201,24 +198,24 @@ class RhythmDetector(object):
         flat_mag = mag.flatten()
         
         # Average flow magnitude
-        if 'average' in chosen_metrics:
+        if 'magnitude_average' in chosen_metrics:
             average_motion = np.mean(flat_mag)
-            self.metrics['average'] = self.metrics.get('average', []) + [average_motion]
+            self.metrics['magnitude_average'] = self.metrics.get('magnitude_average', []) + [average_motion]
             console_output += "\naverage motion: {:.4f}".format(average_motion)
 
         # Different percentiles of flow magnitude frequency
-        if 'percentiles' in chosen_metrics:
-            if self.metrics.get('percentiles') is None:
-                self.metrics['percentiles'] = [[] for i in self.percentiles]
+        if 'magnitude_percentiles' in chosen_metrics:
+            if self.metrics.get('magnitude_percentiles') is None:
+                self.metrics['magnitude_percentiles'] = [[] for i in self.percentiles]
 
             for index, percent in enumerate(self.percentiles):
                 percentile_motion = np.percentile(flat_mag, percent)
-                self.metrics['percentiles'][index].append(percentile_motion)  # TODO: generalize to more percentiles.
+                self.metrics['magnitude_percentiles'][index].append(percentile_motion)  # TODO: generalize to more percentiles.
 
             console_output += "\npercentiles: {}th = {:.4f}, {}th = {:.4f}, {}th = {:.4f}".format(
-                self.percentiles[0], self.metrics['percentiles'][0][-1], 
-                self.percentiles[1], self.metrics['percentiles'][1][-1],
-                self.percentiles[2], self.metrics['percentiles'][2][-1]
+                self.percentiles[0], self.metrics['magnitude_percentiles'][0][-1], 
+                self.percentiles[1], self.metrics['magnitude_percentiles'][1][-1],
+                self.percentiles[2], self.metrics['magnitude_percentiles'][2][-1]
             )
 
         # TODO: Fit line to histogram
@@ -235,19 +232,19 @@ class RhythmDetector(object):
         # TODO: Plot all computed metrics by looping through keys?
         """
         self.ax_metrics.clear()
-        if 'average' in chosen_metrics:
-            if self.metrics.get('average') is None or self.metrics.get('average') == []:
+        if 'magnitude_average' in chosen_metrics:
+            if self.metrics.get('magnitude_average') is None or self.metrics.get('magnitude_average') == []:
                 print('Metric "average" not computed')
 
-            self.ax_metrics.plot(self.metrics['average'], label='average')
+            self.ax_metrics.plot(self.metrics['magnitude_average'], label='magnitude_average')
 
-        if 'percentiles' in chosen_metrics:
-            if self.metrics.get('percentiles') is None or self.metrics.get('percentiles') == []:
+        if 'magnitude_percentiles' in chosen_metrics:
+            if self.metrics.get('magnitude_percentiles') is None or self.metrics.get('magnitude_percentiles') == []:
                 print('Metric "percentiles" not computed')
 
             for index, percent in enumerate(self.percentiles):
                 self.ax_metrics.plot(
-                    self.metrics['percentiles'][index],
+                    self.metrics['magnitude_percentiles'][index],
                     label='{}th percentile'.format(percent)
                 )
 
@@ -376,7 +373,8 @@ class RhythmDetector(object):
 
 if __name__ == "__main__":
     start = time.time()
-    rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
+    # rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
+    rhy_det = RhythmDetector(video_name='whiplash.mov')
 
     # lk_optical_flow(VIDEO_PATH)
     rhy_det.analyze()
