@@ -224,15 +224,15 @@ class RhythmDetector(object):
             if self.metrics.get('magnitude_percentiles') is None:
                 self.metrics['magnitude_percentiles'] = [[] for i in self.percentiles]
 
+            percentile_strings = []
             for index, percent in enumerate(self.percentiles):
                 percentile_motion = np.percentile(flat_mag, percent)
-                self.metrics['magnitude_percentiles'][index].append(percentile_motion)  # TODO: generalize to more percentiles.
+                self.metrics['magnitude_percentiles'][index].append(percentile_motion)
+                percentile_strings.append("{}th = {:.4f}".format(
+                    percent, 
+                    self.metrics['magnitude_percentiles'][index][-1]))
 
-            console_output += "\npercentiles: {}th = {:.4f}, {}th = {:.4f}".format(  #, {}th = {:.4f}".format(
-                self.percentiles[0], self.metrics['magnitude_percentiles'][0][-1], 
-                self.percentiles[1], self.metrics['magnitude_percentiles'][1][-1],
-                # self.percentiles[2], self.metrics['magnitude_percentiles'][2][-1] # TODO: Generalize this
-            )
+            console_output += "\npercentiles: " + ', '.join(percentile_strings)
 
         # TODO: Fit line to histogram
         # A, B = np.polyfit(x, numpy.log(y), 1, w=numpy.sqrt(y))
