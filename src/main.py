@@ -64,7 +64,7 @@ class RhythmDetector(object):
 
     def analyze(self,
         method='dense_optical_flow',
-        chosen_metrics=['net_vector', 'magnitude_percentiles', 'magnitude_average'], # TODO: Add 'all' as an option
+        chosen_metrics=['all'],
         show_viz=True,
         verbose=True,
         save_all=True):
@@ -89,7 +89,7 @@ class RhythmDetector(object):
             return None
 
     def dense_optical_flow(self,
-        chosen_metrics=['net_vector', 'magnitude_percentiles', 'magnitude_average'],
+        chosen_metrics=['all'],
         show_viz=True,
         verbose=True,
         save_all=True):
@@ -117,7 +117,6 @@ class RhythmDetector(object):
         while(True):  # frame goes None when video stops
             _, frame = cap.read()
             self.current_frame = cap.get(cv.CAP_PROP_POS_FRAMES)
-            print("self.current_frame = {}".format(self.current_frame))
 
             if frame is None:
                 print("end of video")
@@ -140,7 +139,7 @@ class RhythmDetector(object):
                 hsv[...,2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)
                 viz_image = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
 
-                if 'net_vector' in chosen_metrics:
+                if 'net_vector' in chosen_metrics or 'all' in chosen_metrics:
                     net_vector = self.metrics['net_vector'][-1]
                     net_vector_mag, net_vector_ang = cv.cartToPolar(float(net_vector[0]), float(net_vector[1]))
 
@@ -197,12 +196,13 @@ class RhythmDetector(object):
         between the current and the previous flow. This would show those sharp
         corners that function as beats.
         """
+        all_metrics_chosen = 'all' in chosen_metrics
         console_output = '\n'
         
         mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
         flat_mag = mag.flatten()
 
-        if 'net_vector' in chosen_metrics:
+        if all_metrics_chosen or 'net_vector' in chosen_metrics:
             # Average the flow vectors
             net_vector = np.sum(np.sum(flow, axis=0), axis=0) / np.size(flow)
 
@@ -214,13 +214,13 @@ class RhythmDetector(object):
             console_output += "\nnet_vector: {}".format(net_vector)
 
         # Average flow magnitude
-        if 'magnitude_average' in chosen_metrics:
+        if all_metrics_chosen or 'magnitude_average' in chosen_metrics:
             average_motion = np.mean(flat_mag)
             self.metrics['magnitude_average'] = self.metrics.get('magnitude_average', []) + [average_motion]
             console_output += "\naverage motion: {:.4f}".format(average_motion)
 
         # Different percentiles of flow magnitude frequency
-        if 'magnitude_percentiles' in chosen_metrics:
+        if all_metrics_chosen or 'magnitude_percentiles' in chosen_metrics:
             if self.metrics.get('magnitude_percentiles') is None:
                 self.metrics['magnitude_percentiles'] = [[] for i in self.percentiles]
 
@@ -233,6 +233,7 @@ class RhythmDetector(object):
                     self.metrics['magnitude_percentiles'][index][-1]))
 
             console_output += "\npercentiles: " + ', '.join(percentile_strings)
+            # eg. console_output = "\npercentiles: 50th = 0.1891, 75th = 0.4381"
 
         # TODO: Fit line to histogram
         # A, B = np.polyfit(x, numpy.log(y), 1, w=numpy.sqrt(y))
@@ -247,9 +248,10 @@ class RhythmDetector(object):
 
         # TODO: Plot all computed metrics by looping through keys?
         """
+        all_metrics_chosen = 'all' in chosen_metrics
         self.ax_metrics.clear()
 
-        if 'net_vector' in chosen_metrics:
+        if all_metrics_chosen or 'net_vector' in chosen_metrics:
             if self.metrics.get('net_vector') is None or len(self.metrics.get('net_vector')) == 0:
                 print('Metric "net_vector" not computed')
             else:
@@ -259,13 +261,13 @@ class RhythmDetector(object):
                 self.ax_metrics.plot(net_vector_mag, label='net_vector magnitude')
                 self.ax_metrics.plot(net_vector_ang, label='net_vector angle')
 
-        if 'magnitude_average' in chosen_metrics:
+        if all_metrics_chosen or 'magnitude_average' in chosen_metrics:
             if self.metrics.get('magnitude_average') is None or self.metrics.get('magnitude_average') == []:
                 print('Metric "average" not computed')
             else:
                 self.ax_metrics.plot(self.metrics['magnitude_average'], label='magnitude_average')
 
-        if 'magnitude_percentiles' in chosen_metrics:
+        if all_metrics_chosen or 'magnitude_percentiles' in chosen_metrics:
             if self.metrics.get('magnitude_percentiles') is None or self.metrics.get('magnitude_percentiles') == []:
                 print('Metric "percentiles" not computed')
 
