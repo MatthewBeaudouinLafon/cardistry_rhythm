@@ -12,23 +12,6 @@ from matplotlib.transforms import Bbox
 # most motion = pixel like in original vid. 
 # TODO: Stop being lazy and move these ideas to an actual document or GH issues. 
 
-def full_extent(ax, pad=0.0):
-    """
-    Get the full extent of an axes, including axes labels, tick labels, and
-    titles. From:
-    https://stackoverflow.com/questions/4325733/save-a-subplot-in-matplotlib
-    TODO: Is this needed?
-    """
-    # For text objects, we need to draw the figure first, otherwise the extents
-    # are undefined.
-    ax.figure.canvas.draw()
-    items = ax.get_xticklabels() + ax.get_yticklabels() 
-    # items += [ax, ax.title, ax.xaxis.label, ax.yaxis.label]
-    items += [ax, ax.title]
-    bbox = Bbox.union([item.get_window_extent() for item in items])
-
-    return bbox.expanded(1.0 + pad, 1.0 + pad)
-
 
 class RhythmDetector(object):
     """
@@ -55,7 +38,7 @@ class RhythmDetector(object):
         plt.ion()
         # TODO: Make figure size the same aspect ratio as the video?
         self.fig, (self.ax_mag_distribution, self.ax_ang_distribution, self.ax_metrics) = \
-            plt.subplots(nrows=3, ncols=1)
+            plt.subplots(nrows=3, ncols=1, figsize=(5,5))
         self.plot_lines = []  # Used to store plot lines so that they can be cleared on redraw. 
         self.metrics = {}
         # when computed, depending on what's passed:
@@ -68,6 +51,7 @@ class RhythmDetector(object):
     def has_computed_metric(self, metric_name):
         """
         Returns whether a metric has been computed.
+        TODO: Use for input safety's sake.
         """
         return self.metrics.get(metric_name, None) is not None
 
@@ -116,11 +100,14 @@ class RhythmDetector(object):
         hsv[...,1] = 255
 
         if save_all:
+            vid_width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
+            vid_height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
+            plot_height = vid_width  # TODO: Refactor for safety
             full_video_out = cv.VideoWriter(
                 'result/' + self.video_name[:-4] +'_analysis.mov',  # TODO: Better path join
                 cv.VideoWriter.fourcc('m','p','4','v'),
                 cap.get(cv.CAP_PROP_FPS),
-                (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), 2*int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))) # times 2 to hold the plot as well. TODO: Generalize
+                (vid_width, vid_height + plot_height)
             )  # filename, fourcc, fps, frameSize
 
         if len(chosen_metrics) > 0: # TODO: Good?
@@ -169,12 +156,12 @@ class RhythmDetector(object):
 
 
                 if save_all:
-                    # Convert plot image to np array to save with opencv TODO: wtf is this seriously the best way to do this
+                    # Convert plot image to np array to save with opencv TODO: wtf is this seriously the best way to do this  
                     plot_image_array = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
                     plot_image_array = plot_image_array.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
 
                     # Resize the raster image of the plot *gag* TODO: Do this in a gag-less way. 
-                    plot_image_array = cv.resize(plot_image_array, (int(cap.get(cv.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))))
+                    plot_image_array = cv.resize(plot_image_array, (vid_width, vid_width))
                     plot_image_array = cv.cvtColor(plot_image_array, cv.COLOR_RGB2BGR)
                     
                     full_video_out.write(np.concatenate((viz_image, plot_image_array), axis=0))
@@ -254,7 +241,7 @@ class RhythmDetector(object):
             
     def plot_metrics(self, chosen_metrics, flow=None):
         """
-        Plots computed metrics.
+        Plot with updated metrics.
 
         # TODO: Refactor to make a Metric class.
         # TODO: Plot all computed metrics by looping through keys?
@@ -319,21 +306,21 @@ class RhythmDetector(object):
         self.ax_mag_distribution.set_ylabel('Frequency')
         self.ax_mag_distribution.set_xlim(0, 100)  # TODO: no magic numbers
         self.ax_mag_distribution.set_ylim(10, 60000)
-        self.ax_mag_distribution.set_title('Distribution of pixel motion magnitude')
+        # self.ax_mag_distribution.set_title('Distribution of pixel motion magnitude')
 
         # Display the magnitude pixel motion in a histogram
         self.ax_ang_distribution.set_xlabel('Motion Angle (radians)')
         self.ax_ang_distribution.set_ylabel('Frequency')
         self.ax_ang_distribution.set_xlim(0, 2*np.pi)
         self.ax_ang_distribution.set_ylim(10, 60000)  # TODO: no magic numbers (Why does 60000 work consistently?)
-        self.ax_ang_distribution.set_title('Distribution of pixel motion angle')
+        # self.ax_ang_distribution.set_title('Distribution of pixel motion angle')
 
         # Display motion metrics throughout the video
         self.ax_metrics.set_xlabel('time (frames)')
         self.ax_metrics.set_ylabel('metric')
         self.ax_metrics.set_xlim(0, self.total_frame_number)
         self.ax_metrics.set_ylim(0, 6)
-        self.ax_metrics.set_title('Other metrics')
+        # self.ax_metrics.set_title('Other metrics')
         
         # Mock plots to build the legend.
         # TODO: Don't like this code duplication ...
@@ -346,10 +333,10 @@ class RhythmDetector(object):
                     label='{}th percentile'.format(percent), 
                     color='C{}'.format(4+index)  # Make all percentile lines a different color
                 )
-        legend = self.fig.legend(loc='lower center', ncol=3)
+        self.fig.legend(loc='lower center', ncol=2)
 
         self.fig.tight_layout()
-        self.fig.subplots_adjust(bottom=0.2)
+        self.fig.subplots_adjust(bottom=0.25)
         self.fig.canvas.draw()
         pass
 
@@ -383,6 +370,7 @@ class RhythmDetector(object):
         """
         Calculates Lucas-Kanade optical flow on video. Code taken from
             https://docs.opencv.org/3.4/d7/d8b/tutorial_py_lucas_kanade.html
+        NOTE: This doesn't do any of the fancy metric stuff.
         """
         cap = cv.VideoCapture(self.video_path)
 
