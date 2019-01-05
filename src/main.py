@@ -1,5 +1,6 @@
 import math
 import time
+from enum import Enum
 import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
@@ -58,47 +59,45 @@ class RhythmDetector(object):
     def analyze(self,
         method='dense_optical_flow',
         chosen_metrics=['all'],
-        show_viz=True,
-        verbose=True,
-        save_all=True):
+        show_viz=True,  # TODO: Rethink what these options should be.
+        save_all=True,
+        verbose=True):
         """
-        Run video analysis.
+        Analyze video using optical flow. 
+
         Inputs:
-            method(string): one of 'dense_optical_flow'
-            chosen_metrics ([string]) : array of strings featuring 'magnitude_percentiles', 'magnitude_average']
-            show_viz (bool)           : Show visualizations while running
-            verbose (bool)            : Print metrics.
-            save_all (bool)           : Save metrics, plots, and viz if enabled. 
+            method(string): 
+                one of 'dense_optical_flow'
+            
+            chosen_metrics ([string]):
+                array of strings featuring 'magnitude_percentiles', 'magnitude_average'  # TODO: Update after plot class refactor
+            
+            show_viz (bool):
+                Show visualizations while running
+            
+            verbose (bool):
+                Print metrics.
+            
+            save_all (bool):
+                Save metrics, plots, and viz if enabled. 
         """
+        # Choose method
         if method == 'dense_optical_flow':
             print("Analyzing using Optical Flow")
-            self.dense_optical_flow(
-                chosen_metrics=chosen_metrics,
-                show_viz=show_viz,
-                verbose=verbose,
-                save_all=save_all)
+            calculate_flow = self.dense_optical_flow
         else:
             print('Method "{}" unknown.'.format(method))
-            return None
+            return
 
-    def dense_optical_flow(self,
-        chosen_metrics=['all'],
-        show_viz=True,
-        verbose=True,
-        save_all=True):
-        """
-        Calculates dense optical flow on video (ie does it on every pixel).
-        Image vizualizer code taken from
-            https://docs.opencv.org/3.4/d7/d8b/tutorial_py_lucas_kanade.html
-        """
-
+        # Setup Open CV
         cap = cv.VideoCapture(self.video_path)
-        self.total_frame_number = cap.get(cv.CAP_PROP_FRAME_COUNT)
         _, frame = cap.read()
         previous_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
         hsv = np.zeros_like(frame)
         hsv[...,1] = 255
+        self.total_frame_number = cap.get(cv.CAP_PROP_FRAME_COUNT)
 
+        # Setup video writers
         if save_all:
             vid_width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
             vid_height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
@@ -110,10 +109,12 @@ class RhythmDetector(object):
                 (vid_width, vid_height + plot_height)
             )  # filename, fourcc, fps, frameSize
 
+        # Setup plots
         if len(chosen_metrics) > 0: # TODO: Good?
             self.setup_plots()
 
         while(True):  # frame goes None when video stops
+            # Read Frame
             _, frame = cap.read()
             self.current_frame = cap.get(cv.CAP_PROP_POS_FRAMES)
 
@@ -121,11 +122,11 @@ class RhythmDetector(object):
                 print("end of video")
                 break
 
-            # Calculate flow
+            # Do Flow
             current_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
-            flow = cv.calcOpticalFlowFarneback(previous_bw, current_bw, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+            flow = calculate_flow(previous_bw, current_bw)
 
-            # Compute Metics - updates self.metrics
+            # Compute Metrics
             self.compute_metric(flow, chosen_metrics, verbose=verbose)
 
             if show_viz:
@@ -288,6 +289,8 @@ class RhythmDetector(object):
                     color='C{}'.format(4+index)  # Make all percentile lines a different color
                 )
 
+        print("average magnitude / Net vector magnitude = {}".format(self.metrics['magnitude_average'][-1] / net_vector_mag[-1]))
+
         # NOTE: If you add a new plot with a legend, make sure to update the mock plots in setup_plots
 
         self.fig.canvas.draw()
@@ -344,6 +347,9 @@ class RhythmDetector(object):
         """
         Save metric graphs in result/ folder. Includes average, 25th, 50th
         and 75th percentiles.
+
+        Note: Deprecated for now because plots are saved with video. Code still
+        here just in case.
         """
         extent = self.ax_metrics.get_tightbbox(self.fig.canvas.renderer).transformed(self.fig.dpi_scale_trans.inverted())
         self.fig.savefig('result/' + self.video_name[:-4] + '_metrics.png', bbox_inches=extent)
@@ -365,6 +371,10 @@ class RhythmDetector(object):
 
         cv.destroyAllWindows()
         cap.release()
+
+    def dense_optical_flow(self, previous_frame, current_frame):
+        # TODO: Make static/refactor out?
+        return cv.calcOpticalFlowFarneback(previous_frame, current_frame, None, 0.5, 3, 15, 3, 5, 1.2, 0)
 
     def lk_optical_flow(self):
         """
@@ -436,9 +446,9 @@ if __name__ == "__main__":
     # TODO: Make result/ and metrics/ folder if they don't exist.
 
     start = time.time()
-    rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
+    # rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
     # rhy_det = RhythmDetector(video_name='whiplash.mov')
+    rhy_det = RhythmDetector(video_name='BasicMotion.mov')
 
-    # lk_optical_flow(VIDEO_PATH)
     rhy_det.analyze()
     print("Took {}seconds".format(time.time() - start))
