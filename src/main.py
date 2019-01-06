@@ -331,17 +331,16 @@ class RhythmDetector(object):
         self.ax_metrics.plot([], label='net_vector angle', color='C1')
         self.ax_metrics.plot([], label='magnitude_average', color='C2')
         for index, percent in enumerate(self.percentiles):
-                self.ax_metrics.plot(
-                    [],
-                    label='{}th percentile'.format(percent), 
-                    color='C{}'.format(4+index)  # Make all percentile lines a different color
-                )
+            self.ax_metrics.plot(
+                [],
+                label='{}th percentile'.format(percent), 
+                color='C{}'.format(4+index)  # Make all percentile lines a different color
+            )
         self.fig.legend(loc='lower center', ncol=2)
 
         self.fig.tight_layout()
         self.fig.subplots_adjust(bottom=0.25)
         self.fig.canvas.draw()
-        pass
 
     def save_final_plots(self):
         """

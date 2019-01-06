@@ -1,6 +1,8 @@
 from enum import IntEnum
 import numpy as np
 import cv2 as cv
+import matplotlib.pyplot as plt
+from matplotlib.transforms import Bbox
 
 
 class Metric(IntEnum):
@@ -36,8 +38,8 @@ class Metric(IntEnum):
     
     LAST_NUMBER = 29
 
-    @staticmethod
-    def is_histogram(metric):
+    # TODO: Make metric method s.t. you do metric.is_histogram()
+    def is_histogram(self):
         """
         Inputs:
             metric (Metric enum)
@@ -45,10 +47,9 @@ class Metric(IntEnum):
         Ouput (bool):
             Whether given metric is a histogram
         """
-        return Metric.FIRST_HISTOGRAM < metric < Metric.LAST_HISTOGRAM
+        return Metric.FIRST_HISTOGRAM < self < Metric.LAST_HISTOGRAM
 
-    @staticmethod
-    def is_vector(metric):
+    def is_vector(self):
         """
         Inputs:
             metric (Metric enum)
@@ -56,10 +57,9 @@ class Metric(IntEnum):
         Ouput (bool):
             Whether given metric is a vector
         """
-        return Metric.FIRST_VECTOR < metric < Metric.LAST_VECTOR
+        return Metric.FIRST_VECTOR < self < Metric.LAST_VECTOR
 
-    @staticmethod
-    def is_number(metric):
+    def is_number(self):
         """
         Inputs:
             metric (Metric enum)
@@ -67,9 +67,8 @@ class Metric(IntEnum):
         Ouput (bool):
             Whether given metric is a number
         """
-        return Metric.FIRST_NUMBER < metric < Metric.LAST_NUMBER
+        return Metric.FIRST_NUMBER < self < Metric.LAST_NUMBER
 
-    
 
 class MetricManager(object):
     """
@@ -93,6 +92,8 @@ class MetricManager(object):
         'net_flow_mag' : Metric.NET_FLOW_MAG,
         'net_flow_ang' : Metric.NET_FLOW_ANG
     }
+
+    metric_to_string = dict([value, key] for key, value in string_to_metric.iteritems())
 
     def __init__(self, 
         desired_metrics = [ 
@@ -125,6 +126,10 @@ class MetricManager(object):
         self.percentiles = percentiles
         self.verbose = verbose
 
+        self.full_video_writer = None  # OpenCV video writer 
+        self.subplots = None
+        self.plot_lines = []  # Used to store plot lines so that they can be cleared on redraw. 
+
         self.metric_structure = []  # represent the metric plot structure
         self.metric_data = {}
         # when computed, depending on desired_metrics:
@@ -156,7 +161,7 @@ class MetricManager(object):
                     metric = MetricManager.string_to_metric.get(metric_string)
 
                     # TODO: Find better error message
-                    assert (not Metric.is_histogram(metric)), "Histogram must be alone in subplot."
+                    assert (not metric.is_histogram()), "Histogram must be alone in subplot."
                     assert (metric is not None), Exception('"{}" is not a valid metric string.'.format(plot_metrics[0]))
 
                     sub_plot.append(metric)
@@ -165,12 +170,15 @@ class MetricManager(object):
             self.metric_structure.append(sub_plot)
 
     def register_metric_data(self, metric):
+        """
+        Initialize metric in self.metric_data.
+        """
         # Initialize self.metric_data
-        if not Metric.is_histogram(metric):
+        if not metric.is_histogram():
             if metric is Metric.FLOW_PERCENTILES:
                 self.metric_data[metric] = [[] for i in self.percentiles]
             else:
-                self.metric_data[metric] = []
+                self.metric_data[metric] = np.array([])
                 
     def has_metric(self, metric):
         """
@@ -182,13 +190,16 @@ class MetricManager(object):
         """
         return metric in self.metric_data
 
-    def setup(self, source_vid_size, source_vid_fps, out_vid_path, out_vid_name):
+    def setup(self, source_vid_length, source_vid_size, source_vid_fps, out_vid_path, out_vid_name):
         """
         Initialize video writers and plots.
 
         Inputs:
+            source_vid_length(int):
+                length of video in frames.
+
             source_vid_size ((int, int)):
-                (width, height) of source video
+                (width, height) of source video.
             
             source_vid_fps (float):
                 Framerate of source video.
@@ -203,17 +214,15 @@ class MetricManager(object):
         vid_width = int(source_vid_size[0])
         vid_height = int(source_vid_size[1])
         plot_height = vid_width  # TODO: Refactor for safety
-        full_video_out = cv.VideoWriter(
+        self.full_video_writer = cv.VideoWriter(
             out_vid_path,
             cv.VideoWriter.fourcc('m','p','4','v'),
             source_vid_fps,
             (vid_width, vid_height + plot_height)
         )  # filename, fourcc, fps, frameSize
 
-        # TODO: Figure this out
-        # if len(self.desired_metrics) > 0:
-        #     self.setup_plots()
-
+        self.setup_plots(source_vid_length)
+        
     def compute_metrics(self, flow, dflow=None ):
         """
         Calculate the motion metric from the flow. 
@@ -229,49 +238,102 @@ class MetricManager(object):
         mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
         flat_mag = mag.flatten()
 
-        # if self.has_metric(Metric.NET_FLOW):
-        #     # Average the flow vectors
-        #     net_vector = np.sum(np.sum(flow, axis=0), axis=0) / np.size(flow)
+        # Average the flow vectors
+        if self.has_metric(Metric.NET_FLOW):
+            net_vector = np.sum(np.sum(flow, axis=0), axis=0) / np.size(flow)
 
-        #     if self.metrics.get('net_vector') is None:
-        #         self.metrics['net_vector'] = np.array([net_vector])
-        #     else:
-        #         self.metrics['net_vector'] = np.vstack((self.metrics['net_vector'], net_vector))
+            if self.metric_data[Metric.NET_FLOW]:
+                self.metric_data[Metric.NET_FLOW] = np.array([net_vector])
+            else:
+                self.metric_data[Metric.NET_FLOW] = np.vstack((self.metric_data[Metric.NET_FLOW], net_vector))
+            # NOTE: should make this a function when other vector metrics are added. 
             
-        #     console_output += "\nnet_vector: {}".format(net_vector)
+            console_output += "\nnet_vector: {}".format(net_vector)
 
-        # # Average flow magnitude
-        # if all_metrics_chosen or 'magnitude_average' in chosen_metrics:
-        #     average_motion = np.mean(flat_mag)
-        #     self.metrics['magnitude_average'] = self.metrics.get('magnitude_average', []) + [average_motion]
-        #     console_output += "\naverage motion: {:.4f}".format(average_motion)
+        # Average flow magnitude
+        if self.has_metric(Metric.MEAN_FLOW_MAGNITUDE):
+            average_motion = np.mean(flat_mag)
 
-        # # Different percentiles of flow magnitude frequency
-        # if all_metrics_chosen or 'magnitude_percentiles' in chosen_metrics:
-        #     if self.metrics.get('magnitude_percentiles') is None:
-        #         self.metrics['magnitude_percentiles'] = [[] for i in self.percentiles]
+            self.metric_data[Metric.MEAN_FLOW_MAGNITUDE].append(average_motion)
+            console_output += "\naverage motion: {:.4f}".format(average_motion)
 
-        #     percentile_strings = []
-        #     for index, percent in enumerate(self.percentiles):
-        #         percentile_motion = np.percentile(flat_mag, percent)
-        #         self.metrics['magnitude_percentiles'][index].append(percentile_motion)
-        #         percentile_strings.append("{}th = {:.4f}".format(
-        #             percent, 
-        #             self.metrics['magnitude_percentiles'][index][-1]))
+        # Different percentiles of flow magnitude frequency
+        if self.has_metric(Metric.FLOW_PERCENTILES):
+            percentile_strings = []
+            for index, percent in enumerate(self.percentiles):
+                percentile_motion = np.percentile(flat_mag, percent)
+                self.metric_data[Metric.FLOW_PERCENTILES][index].append(percentile_motion)
+                percentile_strings.append("{}th = {:.4f}".format(
+                    percent, 
+                    self.metric_data[Metric.FLOW_PERCENTILES][index][-1]))
 
-        #     console_output += "\npercentiles: " + ', '.join(percentile_strings)
-        #     # eg. console_output = "\npercentiles: 50th = 0.1891, 75th = 0.4381"
+            console_output += "\npercentiles: " + ', '.join(percentile_strings)
+            # eg. console_output = "\npercentiles: 50th = 0.1891, 75th = 0.4381"
 
-        # # TODO: Fit line to histogram
-        # # A, B = np.polyfit(x, numpy.log(y), 1, w=numpy.sqrt(y))
+        # TODO: Fit line to histogram
+        # A, B = np.polyfit(x, numpy.log(y), 1, w=numpy.sqrt(y))
 
-        # if self.verbose:
-        #     # Build the string to print once so the console doesn't go nuts
-        #     print(console_output)
+        if self.verbose:
+            # Build the string to print once so the console doesn't go nuts
+            print(console_output)
             
+    def setup_plots(self, source_vid_length):
+        plt.ion()
+        self.fig, self.subplots = \
+            plt.subplots(nrows=len(self.metric_structure), ncols=1, figsize=(5,5))
 
-    def setup_plots(self):
-        pass
+        # TODO: Deal with duplicate metrics elegantly
+        color_counter = 0  # used for legend coloring
+
+        for index, metric_group in enumerate(self.metric_structure):
+            axes = self.subplots[index]
+
+            if metric_group[0].is_histogram():
+                metric = metric_group[0]
+                axes.set_ylabel('Frequency')
+                axes.set_ylim(10, 60000)
+
+                # TODO: Maybe generalize this into a metric_to_plot_descriptors dict
+                if metric is Metric.FLOW_MAG_DISTRIBUTION:
+                    axes.set_xlabel('Motion Magnitude (pixels)')
+                    axes.set_xlim(0, 100)
+                elif metric is Metric.DFLOW_MAG_DISTRIBUTION:
+                    axes.set_xlabel('Motion Derivative Magnitude (pixels/frame)')
+                    axes.set_xlim(0, 100)
+                elif metric is Metric.FLOW_ANG_DISTRIBUTION:
+                    axes.set_xlabel('Motion Angle (radians)')
+                    axes.set_xlim(0, 2*np.pi)
+                elif metric is Metric.DFLOW_ANG_DISTRIBUTION:
+                    axes.set_xlabel('Motion Derivative Angle (radians/frame)')
+                    axes.set_xlim(0, 2*np.pi)
+                else:
+                    raise Exception("Histogram plot labels not found")
+
+            else:
+                # metric plot
+                # TODO: Make more descriptive ylabel if there's only one metric.
+                axes.set_xlabel('time (frames)')
+                axes.set_ylabel('metric')
+                axes.set_xlim(0, source_vid_length)  # TODO: no magic numbers
+                axes.set_ylim(10, 60000)
+
+                for metric in metric_group:
+                    if metric is Metric.FLOW_PERCENTILES:
+                        for index, percent in enumerate(self.percentiles):
+                            axes.plot(
+                                [],
+                                label='{}th percentile'.format(percent), 
+                                color='C{}'.format(color_counter)  # Make all percentile lines a different color
+                            )
+                            color_counter += 1
+                    else:
+                        axes.plot([], label=MetricManager.metric_to_string[metric], color='C{}'.format(color_counter))
+                        color_counter += 1
+
+        self.fig.legend(loc='lower center', ncol=2)
+        self.fig.tight_layout()
+        self.fig.subplots_adjust(bottom=0.25)
+        self.fig.canvas.draw()
 
     def clear_plots(self):
         pass
