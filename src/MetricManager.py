@@ -1,6 +1,9 @@
-from enum import Enum
+from enum import IntEnum
+import numpy as np
+import cv2 as cv
 
-class Metric(Enum):
+
+class Metric(IntEnum):
     """
     Metrics used by MetricManager.
 
@@ -28,10 +31,13 @@ class Metric(Enum):
     FIRST_NUMBER = 20
     MEAN_FLOW_MAGNITUDE = 21
     FLOW_PERCENTILES = 22
+    NET_FLOW_MAG = 23
+    NET_FLOW_ANG = 24
     
     LAST_NUMBER = 29
 
-    def is_histogram(self, metric):
+    @staticmethod
+    def is_histogram(metric):
         """
         Inputs:
             metric (Metric enum)
@@ -41,7 +47,8 @@ class Metric(Enum):
         """
         return Metric.FIRST_HISTOGRAM < metric < Metric.LAST_HISTOGRAM
 
-    def is_vector(self, metric):
+    @staticmethod
+    def is_vector(metric):
         """
         Inputs:
             metric (Metric enum)
@@ -51,7 +58,8 @@ class Metric(Enum):
         """
         return Metric.FIRST_VECTOR < metric < Metric.LAST_VECTOR
 
-    def is_number(self, metric):
+    @staticmethod
+    def is_number(metric):
         """
         Inputs:
             metric (Metric enum)
@@ -81,10 +89,17 @@ class MetricManager(object):
 
         # Numbers
         'mean_flow_magnitude' : Metric.MEAN_FLOW_MAGNITUDE,
-        'flow_percentiles' : Metric.FLOW_PERCENTILES
+        'flow_percentiles' : Metric.FLOW_PERCENTILES,
+        'net_flow_mag' : Metric.NET_FLOW_MAG,
+        'net_flow_ang' : Metric.NET_FLOW_ANG
     }
 
-    def __init__(self, desired_metrics, 
+    def __init__(self, 
+        desired_metrics = [ 
+                            ['flow_mag_distribution'],
+                            ['flow_ang_distribution'],
+                            ['mean_flow_magnitude', 'flow_percentiles', 'net_flow_mag', 'net_flow_ang']
+                          ], 
         image_viz='color',
         percentiles=[50, 75],
         verbose=True):
@@ -106,35 +121,184 @@ class MetricManager(object):
         """
         num_subplots = 3
 
-        # Check desired_metrics looks good
-        assert (len(desired_metrics) > num_subplots), "len(desired_metrics) must be {} or less.".format(num_subplots)
+        self.image_viz = image_viz
+        self.percentiles = percentiles
+        self.verbose = verbose
 
-        self.desired_metrics = []
+        self.metric_structure = []  # represent the metric plot structure
+        self.metric_data = {}
+        # when computed, depending on desired_metrics:
+        # {
+        #     Metric.MEAN_FLOW: [],
+        #     Metric.FLOW_PERCENTILES: [[] for i in self.percentiles],
+        #     ...
+        # }
+
+        # Check desired_metrics looks good
+        assert (len(desired_metrics) < (num_subplots + 1)), "len(desired_metrics) must be {} or less.".format(num_subplots)
+
         for plot_metrics in desired_metrics:
             sub_plot = []
             
+            # Check sub-arrays are well formed
             if len(plot_metrics) == 0:
                 raise Exception("Empty array in desired_metrics.")
 
             elif len(plot_metrics) == 1:
-                metric = string_to_metric.get(plot_metrics[0])
-                if metric is None:
-                    raise Exception('"{}" is not a valid metric string.'.format(plot_metrics[0]))
-                
-                # TODO: figure out how to do the plot stuff
+                metric = MetricManager.string_to_metric.get(plot_metrics[0])
+                assert (metric is not None), Exception('"{}" is not a valid metric string.'.format(plot_metrics[0]))
+                sub_plot = [metric]
+                self.register_metric_data(metric)
+
             else:
+                # Initialize self.metric_structure and self.metric_data
                 for metric_string in plot_metrics:
-                    # TODO: Find better error
-                    assert (not Metric.is_histogram(metric_string)), "Histogram must be alone in subplot."
+                    metric = MetricManager.string_to_metric.get(metric_string)
 
-                    metric = string_to_metric.get(metric_string)
-                    if metric is None:
-                        raise Exception('"{}" is not a valid metric string.'.format(plot_metrics[0]))
+                    # TODO: Find better error message
+                    assert (not Metric.is_histogram(metric)), "Histogram must be alone in subplot."
+                    assert (metric is not None), Exception('"{}" is not a valid metric string.'.format(plot_metrics[0]))
 
-                    # TODO: figure out how to do the plot stuff
+                    sub_plot.append(metric)
+                    self.register_metric_data(metric)
 
-            self.desired_metrics.append(sub_plot)
+            self.metric_structure.append(sub_plot)
 
-        self.image_viz = image_viz
-        self.percentiles = percentiles
-        self.verbose = verbose
+    def register_metric_data(self, metric):
+        # Initialize self.metric_data
+        if not Metric.is_histogram(metric):
+            if metric is Metric.FLOW_PERCENTILES:
+                self.metric_data[metric] = [[] for i in self.percentiles]
+            else:
+                self.metric_data[metric] = []
+                
+    def has_metric(self, metric):
+        """
+        Check whether the manager has a desired metric.
+
+        Inputs:
+            metric (Metric enum):
+                metric to check.
+        """
+        return metric in self.metric_data
+
+    def setup(self, source_vid_size, source_vid_fps, out_vid_path, out_vid_name):
+        """
+        Initialize video writers and plots.
+
+        Inputs:
+            source_vid_size ((int, int)):
+                (width, height) of source video
+            
+            source_vid_fps (float):
+                Framerate of source video.
+
+            out_vid_path (string):
+                Location of output video.
+
+            out_vid_name (string):
+                Name of output video.
+        """
+        # Setup video writers
+        vid_width = int(source_vid_size[0])
+        vid_height = int(source_vid_size[1])
+        plot_height = vid_width  # TODO: Refactor for safety
+        full_video_out = cv.VideoWriter(
+            out_vid_path,
+            cv.VideoWriter.fourcc('m','p','4','v'),
+            source_vid_fps,
+            (vid_width, vid_height + plot_height)
+        )  # filename, fourcc, fps, frameSize
+
+        # TODO: Figure this out
+        # if len(self.desired_metrics) > 0:
+        #     self.setup_plots()
+
+    def compute_metrics(self, flow, dflow=None ):
+        """
+        Calculate the motion metric from the flow. 
+
+        TODO: Replace lists with numpy arrays. Initialize to have number of
+        frames length of zeros, index with current frame. 
+        TODO: Try doing a second derivative like thing by taking the difference
+        between the current and the previous flow. This would show those sharp
+        corners that function as beats.
+        """
+        console_output = '\n'
+        
+        mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
+        flat_mag = mag.flatten()
+
+        # if self.has_metric(Metric.NET_FLOW):
+        #     # Average the flow vectors
+        #     net_vector = np.sum(np.sum(flow, axis=0), axis=0) / np.size(flow)
+
+        #     if self.metrics.get('net_vector') is None:
+        #         self.metrics['net_vector'] = np.array([net_vector])
+        #     else:
+        #         self.metrics['net_vector'] = np.vstack((self.metrics['net_vector'], net_vector))
+            
+        #     console_output += "\nnet_vector: {}".format(net_vector)
+
+        # # Average flow magnitude
+        # if all_metrics_chosen or 'magnitude_average' in chosen_metrics:
+        #     average_motion = np.mean(flat_mag)
+        #     self.metrics['magnitude_average'] = self.metrics.get('magnitude_average', []) + [average_motion]
+        #     console_output += "\naverage motion: {:.4f}".format(average_motion)
+
+        # # Different percentiles of flow magnitude frequency
+        # if all_metrics_chosen or 'magnitude_percentiles' in chosen_metrics:
+        #     if self.metrics.get('magnitude_percentiles') is None:
+        #         self.metrics['magnitude_percentiles'] = [[] for i in self.percentiles]
+
+        #     percentile_strings = []
+        #     for index, percent in enumerate(self.percentiles):
+        #         percentile_motion = np.percentile(flat_mag, percent)
+        #         self.metrics['magnitude_percentiles'][index].append(percentile_motion)
+        #         percentile_strings.append("{}th = {:.4f}".format(
+        #             percent, 
+        #             self.metrics['magnitude_percentiles'][index][-1]))
+
+        #     console_output += "\npercentiles: " + ', '.join(percentile_strings)
+        #     # eg. console_output = "\npercentiles: 50th = 0.1891, 75th = 0.4381"
+
+        # # TODO: Fit line to histogram
+        # # A, B = np.polyfit(x, numpy.log(y), 1, w=numpy.sqrt(y))
+
+        # if self.verbose:
+        #     # Build the string to print once so the console doesn't go nuts
+        #     print(console_output)
+            
+
+    def setup_plots(self):
+        pass
+
+    def clear_plots(self):
+        pass
+
+    def plot_metrics(self):
+        pass
+
+    def save_plots(self):
+        # ???
+        pass
+
+    def compute_metric_summary(self):
+        # TODO: Maybe compute some meta metrics like average net_vector angle.
+        pass
+
+if __name__ == "__main__":
+    print("Testing MetricManager")
+    metrics = MetricManager(
+        desired_metrics = [ 
+                ['flow_mag_distribution'],
+                ['flow_ang_distribution'],
+                ['mean_flow_magnitude', 'flow_percentiles', 'net_flow_mag', 'net_flow_ang']
+            ]
+    )
+
+    print("\nChecking data is well formed...")
+    print(metrics.metric_data)
+
+    print("\nChecking plot structure is well formed...")
+    print(metrics.metric_structure)
