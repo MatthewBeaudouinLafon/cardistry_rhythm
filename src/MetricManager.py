@@ -288,17 +288,32 @@ class MetricManager(object):
         pass
 
 if __name__ == "__main__":
+    desired_metrics = [ 
+        ['flow_mag_distribution'],
+        ['flow_ang_distribution'],
+        ['mean_flow_magnitude', 'flow_percentiles', 'net_flow_mag', 'net_flow_ang']
+    ]
+
+    expected_metric_structure = [
+        [Metric.FLOW_MAG_DISTRIBUTION],
+        [Metric.FLOW_ANG_DISTRIBUTION],
+        [Metric.MEAN_FLOW_MAGNITUDE, Metric.FLOW_PERCENTILES, Metric.NET_FLOW_MAG, Metric.NET_FLOW_ANG]
+    ]
+    
+    expected_metric_data = {
+        Metric.MEAN_FLOW_MAGNITUDE: [], 
+        Metric.FLOW_PERCENTILES:    [[], []], 
+        Metric.NET_FLOW_MAG:        [],
+        Metric.NET_FLOW_ANG:        []
+    }
+
     print("Testing MetricManager")
-    metrics = MetricManager(
-        desired_metrics = [ 
-                ['flow_mag_distribution'],
-                ['flow_ang_distribution'],
-                ['mean_flow_magnitude', 'flow_percentiles', 'net_flow_mag', 'net_flow_ang']
-            ]
-    )
+    metrics = MetricManager(desired_metrics = desired_metrics)
 
     print("\nChecking data is well formed...")
-    print(metrics.metric_data)
+    assert (metrics.metric_data == expected_metric_data), Exception("metric data malformed")
+    print("All good")
 
     print("\nChecking plot structure is well formed...")
-    print(metrics.metric_structure)
+    assert (metrics.metric_structure == expected_metric_structure), Exception("metric structure malformed")
+    print("All good")
