@@ -298,15 +298,22 @@ class MetricManager(object):
         flat_mag = mag.flatten()
 
         # Average the flow vectors
-        if self.has_metric(Metric.NET_FLOW):
+        if self.has_metric(Metric.NET_FLOW) or \
+                self.has_metric(Metric.NET_FLOW_MAG) or \
+                self.has_metric(Metric.NET_FLOW_ANG):
             net_vector = np.sum(np.sum(flow, axis=0), axis=0) / np.size(flow)
 
-            if self.metric_data[Metric.NET_FLOW]:
+            if self.metric_data.get(Metric.NET_FLOW) is None:
+                # Might not exist if it's magnitude/angle is requested, but not the vector
                 self.metric_data[Metric.NET_FLOW] = np.array([net_vector])
             else:
                 self.metric_data[Metric.NET_FLOW] = np.vstack((self.metric_data[Metric.NET_FLOW], net_vector))
-            # NOTE: should make this a function when other vector metrics are added. 
             
+            cv_mag, cv_ang = cv.cartToPolar(*net_vector)
+            self.metric_data[Metric.NET_FLOW_MAG].append(cv_mag[0]) # cartToPolar spits out ([mag, 0, 0, 0], [ang, 0, 0, 0])
+            self.metric_data[Metric.NET_FLOW_ANG].append(cv_ang[0])
+            # NOTE: should make this a function when other vector metrics are added. 
+
             console_output += "\nnet_vector: {}".format(net_vector)
 
         # Average flow magnitude
@@ -433,7 +440,7 @@ class MetricManager(object):
                 # Draw magnitude and angle vizualizer
                 diagram_center = (70,70)
                 arrow_length = 50
-                disp_angle = net_vector_ang[0]  # Why does cartToPolar spit out [value, 0, 0, 0]? Beats me.
+                disp_angle = net_vector_ang[0]  # Why does cartToPolar spit out ([mag, 0, 0, 0], [ang, 0, 0, 0])? Beats me.
                 arrow_head = (int(diagram_center[0] + arrow_length * math.cos(disp_angle)), int(diagram_center[1] + arrow_length * math.sin(disp_angle)))
                 
                 cv.circle(img=viz_output, center=diagram_center, radius=int(100*net_vector_mag[0]),color=(0, 0, 255),thickness=-1)            
