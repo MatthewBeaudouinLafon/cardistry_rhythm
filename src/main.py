@@ -40,26 +40,6 @@ class RhythmDetector(object):
         self.total_frames = None
         self.current_frame = 0
 
-        # plt.ion()
-        # TODO: Make figure size the same aspect ratio as the video?
-        # self.fig, (self.ax_mag_distribution, self.ax_ang_distribution, self.ax_metrics) = \
-        #     plt.subplots(nrows=3, ncols=1, figsize=(5,5))
-        # self.plot_lines = []  # Used to store plot lines so that they can be cleared on redraw. 
-        # self.metrics = {}
-        # # when computed, depending on what's passed:
-        # # {
-        # #     'magnitude_average': [],
-        # #     'magnitude_percentiles': [[] for i in self.percentiles],
-        # #     ...
-        # # }
-
-    # def has_computed_metric(self, metric_name):
-    #     """
-    #     Returns whether a metric has been computed.
-    #     TODO: Use for input safety's sake.
-    #     """
-    #     return self.metrics.get(metric_name, None) is not None
-
     def analyze(self,
         method='dense_optical_flow',
         chosen_metrics = [ 
@@ -102,12 +82,11 @@ class RhythmDetector(object):
 
         self.metrics = MetricManager(desired_metrics=chosen_metrics)
 
-        # # Setup Open CV
+        # Setup Open CV
         cap = cv.VideoCapture(self.video_path)
         _, frame = cap.read()
         previous_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
-        # hsv = np.zeros_like(frame)
-        # hsv[...,1] = 255
+
         self.total_frame_number = cap.get(cv.CAP_PROP_FRAME_COUNT)
 
         vid_width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
@@ -121,22 +100,6 @@ class RhythmDetector(object):
             out_vid_path='result/',
             out_vid_name=self.video_name
         )
-
-        # # Setup video writers
-        # if save_all:
-        #     vid_width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
-        #     vid_height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
-        #     plot_height = vid_width  # TODO: Refactor for safety
-        #     full_video_out = cv.VideoWriter(
-        #         'result/' + self.video_name[:-4] +'_analysis.mov',  # TODO: Better path join
-        #         cv.VideoWriter.fourcc('m','p','4','v'),
-        #         cap.get(cv.CAP_PROP_FPS),
-        #         (vid_width, vid_height + plot_height)
-        #     )  # filename, fourcc, fps, frameSize
-
-        # # Setup plots
-        # if len(chosen_metrics) > 0: # TODO: Good?
-        #     self.setup_plots()
 
         while(True):  # frame goes None when video stops
             # Read Frame
@@ -152,47 +115,13 @@ class RhythmDetector(object):
             flow = calculate_flow(previous_bw, current_bw)
 
             # Compute Metrics
-            # self.compute_metric(flow, chosen_metrics, verbose=verbose)
             self.metrics.compute_metrics(flow)
 
             if show_viz:
-                # # Make color viz in another window. Flow magnitude is hsv value, angle is hue.
-                # mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
-                # hsv[...,0] = ang*180/np.pi/2
-                # hsv[...,2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)
-                # viz_image = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
-
-                # Plot metrics
-                # self.plot_metrics(chosen_metrics, flow=flow)
                 self.metrics.plot_metrics(flow)
-
-                # if 'net_vector' in chosen_metrics or 'all' in chosen_metrics:
-                #     net_vector = self.metrics['net_vector'][-1]
-                #     net_vector_mag, net_vector_ang = cv.cartToPolar(float(net_vector[0]), float(net_vector[1]))
-
-                #     # Draw magnitude and angle vizualizer
-                #     diagram_center = (70,70)
-                #     arrow_length = 50
-                #     disp_angle = net_vector_ang[0]  # Why does cartToPolar spit out [value, 0, 0, 0]? Beats me.
-                #     arrow_head = (int(diagram_center[0] + arrow_length * math.cos(disp_angle)), int(diagram_center[1] + arrow_length * math.sin(disp_angle)))
-                #     cv.circle(img=viz_image, center=diagram_center, radius=int(100*net_vector_mag[0]),color=(0, 0, 255),thickness=-1)            
-                #     cv.arrowedLine(viz_image, diagram_center, arrow_head, thickness=2, color=(255,255,255))
 
                 # Show frame in one window
                 cv.imshow('frame', frame)
-                # cv.imshow('flow', viz_image)
-
-                # self.metrics.save_plots()
-                # if save_all:
-                #     # Convert plot image to np array to save with opencv TODO: wtf is this seriously the best way to do this  
-                #     plot_image_array = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
-                #     plot_image_array = plot_image_array.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
-
-                #     # Resize the raster image of the plot *gag* TODO: Do this in a gag-less way. 
-                #     plot_image_array = cv.resize(plot_image_array, (vid_width, vid_width))
-                #     plot_image_array = cv.cvtColor(plot_image_array, cv.COLOR_RGB2BGR)
-                #     full_frame = np.concatenate((frame, plot_image_array), axis=0)
-                #     full_video_out.write(np.concatenate((viz_image, plot_image_array), axis=0))
 
             # Interpret keyboard
             k = cv.waitKey(30) & 0xff
@@ -207,182 +136,8 @@ class RhythmDetector(object):
 
         self.metrics.clean_up()
 
-        # if save_all:
-        #     self.save_final_plots()  # TODO: Check if plots exist?
-        # self.metrics.save_plots(video_name)
-
         cap.release()
         cv.destroyAllWindows()
-
-    def compute_metric(self, flow, chosen_metrics, verbose=True):
-        """
-        Calculate the motion metric from the flow. 
-
-        TODO: Replace lists with numpy arrays. Initialize to have number of
-        frames length of zeros, index with current frame. 
-        TODO: Try doing a second derivative like thing by taking the difference
-        between the current and the previous flow. This would show those sharp
-        corners that function as beats.
-        """
-        all_metrics_chosen = 'all' in chosen_metrics
-        console_output = '\n'
-        
-        mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
-        flat_mag = mag.flatten()
-
-        if all_metrics_chosen or 'net_vector' in chosen_metrics:
-            # Average the flow vectors
-            net_vector = np.sum(np.sum(flow, axis=0), axis=0) / np.size(flow)
-
-            if self.metrics.get('net_vector') is None:
-                self.metrics['net_vector'] = np.array([net_vector])
-            else:
-                self.metrics['net_vector'] = np.vstack((self.metrics['net_vector'], net_vector))
-            
-            console_output += "\nnet_vector: {}".format(net_vector)
-
-        # Average flow magnitude
-        if all_metrics_chosen or 'magnitude_average' in chosen_metrics:
-            average_motion = np.mean(flat_mag)
-            self.metrics['magnitude_average'] = self.metrics.get('magnitude_average', []) + [average_motion]
-            console_output += "\naverage motion: {:.4f}".format(average_motion)
-
-        # Different percentiles of flow magnitude frequency
-        if all_metrics_chosen or 'magnitude_percentiles' in chosen_metrics:
-            if self.metrics.get('magnitude_percentiles') is None:
-                self.metrics['magnitude_percentiles'] = [[] for i in self.percentiles]
-
-            percentile_strings = []
-            for index, percent in enumerate(self.percentiles):
-                percentile_motion = np.percentile(flat_mag, percent)
-                self.metrics['magnitude_percentiles'][index].append(percentile_motion)
-                percentile_strings.append("{}th = {:.4f}".format(
-                    percent, 
-                    self.metrics['magnitude_percentiles'][index][-1]))
-
-            console_output += "\npercentiles: " + ', '.join(percentile_strings)
-            # eg. console_output = "\npercentiles: 50th = 0.1891, 75th = 0.4381"
-
-        # TODO: Fit line to histogram
-        # A, B = np.polyfit(x, numpy.log(y), 1, w=numpy.sqrt(y))
-
-        if verbose:
-            # Build the string to print once so the console doesn't go nuts
-            print(console_output)
-            
-    def plot_metrics(self, chosen_metrics, flow=None):
-        """
-        Plot with updated metrics.
-
-        # TODO: Refactor to make a Metric class.
-        # TODO: Plot all computed metrics by looping through keys?
-        """
-        all_metrics_chosen = 'all' in chosen_metrics
-        
-        self.clear_plots()
-
-        # Plot flow vector frequency distribution
-        if flow is not None:
-            mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
-            _, _, patches_mag = self.ax_mag_distribution.hist(x=mag.flatten(), bins=30, log=True, color='C0')
-            _, _, patches_ang = self.ax_ang_distribution.hist(x=ang.flatten(), bins=30, color='C0')
-            self.plot_lines += patches_mag
-            self.plot_lines += patches_ang
-
-        # Plot net_vector angle and magnitude
-        if all_metrics_chosen or 'net_vector' in chosen_metrics:
-            if self.metrics.get('net_vector') is None or len(self.metrics.get('net_vector')) == 0:
-                print('Metric "net_vector" not computed')
-            else:
-                net_vectors = self.metrics['net_vector']
-                net_vector_mag, net_vector_ang = cv.cartToPolar(net_vectors[...,0], net_vectors[...,1])
-
-                self.plot_lines += self.ax_metrics.plot(net_vector_mag, label='net_vector magnitude', color='C0')
-                self.plot_lines += self.ax_metrics.plot(net_vector_ang, label='net_vector angle', color='C1')
-
-        # Plot average flow vector magnitude
-        if all_metrics_chosen or 'magnitude_average' in chosen_metrics:
-            if self.metrics.get('magnitude_average') is None or self.metrics.get('magnitude_average') == []:
-                print('Metric "average" not computed')
-            else:
-                self.plot_lines += self.ax_metrics.plot(self.metrics['magnitude_average'], label='magnitude_average', color='C2')
-
-        # Plot average flow vector magnitude percentiles
-        if all_metrics_chosen or 'magnitude_percentiles' in chosen_metrics:
-            if self.metrics.get('magnitude_percentiles') is None or self.metrics.get('magnitude_percentiles') == []:
-                print('Metric "percentiles" not computed')
-
-            for index, percent in enumerate(self.percentiles):
-                self.plot_lines += self.ax_metrics.plot(
-                    self.metrics['magnitude_percentiles'][index],
-                    label='{}th percentile'.format(percent), 
-                    color='C{}'.format(4+index)  # Make all percentile lines a different color
-                )
-
-        print("average magnitude / Net vector magnitude = {}".format(self.metrics['magnitude_average'][-1] / net_vector_mag[-1]))
-
-        # NOTE: If you add a new plot with a legend, make sure to update the mock plots in setup_plots
-
-        self.fig.canvas.draw()
-
-    def clear_plots(self):
-        """
-        Remove data from plots for redraw.
-        """
-        for line in self.plot_lines:
-            line.remove()
-        self.plot_lines.clear()
-
-    def setup_plots(self):
-        # Display the magnitude pixel motion in a histogram
-        self.ax_mag_distribution.set_xlabel('Motion Magnitude (pixels)')
-        self.ax_mag_distribution.set_ylabel('Frequency')
-        self.ax_mag_distribution.set_xlim(0, 100)  # TODO: no magic numbers
-        self.ax_mag_distribution.set_ylim(10, 60000)
-        # self.ax_mag_distribution.set_title('Distribution of pixel motion magnitude')
-
-        # Display the magnitude pixel motion in a histogram
-        self.ax_ang_distribution.set_xlabel('Motion Angle (radians)')
-        self.ax_ang_distribution.set_ylabel('Frequency')
-        self.ax_ang_distribution.set_xlim(0, 2*np.pi)
-        self.ax_ang_distribution.set_ylim(10, 60000)  # TODO: no magic numbers (Why does 60000 work consistently?)
-        # self.ax_ang_distribution.set_title('Distribution of pixel motion angle')
-
-        # Display motion metrics throughout the video
-        self.ax_metrics.set_xlabel('time (frames)')
-        self.ax_metrics.set_ylabel('metric')
-        self.ax_metrics.set_xlim(0, self.total_frame_number)
-        self.ax_metrics.set_ylim(0, 6)
-        # self.ax_metrics.set_title('Other metrics')
-        
-        # Mock plots to build the legend.
-        # TODO: Don't like this code duplication ...
-        self.ax_metrics.plot([], label='net_vector magnitude', color='C0')
-        self.ax_metrics.plot([], label='net_vector angle', color='C1')
-        self.ax_metrics.plot([], label='magnitude_average', color='C2')
-        for index, percent in enumerate(self.percentiles):
-            self.ax_metrics.plot(
-                [],
-                label='{}th percentile'.format(percent), 
-                color='C{}'.format(4+index)  # Make all percentile lines a different color
-            )
-        self.fig.legend(loc='lower center', ncol=2)
-
-        self.fig.tight_layout()
-        self.fig.subplots_adjust(bottom=0.25)
-        self.fig.canvas.draw()
-
-    def save_final_plots(self):
-        """
-        Save metric graphs in result/ folder. Includes average, 25th, 50th
-        and 75th percentiles.
-
-        Note: Deprecated for now because plots are saved with video. Code still
-        here just in case.
-        """
-        extent = self.ax_metrics.get_tightbbox(self.fig.canvas.renderer).transformed(self.fig.dpi_scale_trans.inverted())
-        self.fig.savefig('result/' + self.video_name[:-4] + '_metrics.png', bbox_inches=extent)
-        # TODO: Split on '.' to ditch extention
 
     def play_video(self):
         cap = cv.VideoCapture(self.video_path)
@@ -475,8 +230,8 @@ if __name__ == "__main__":
     # TODO: Make result/ and metrics/ folder if they don't exist.
 
     start = time.time()
-    rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
-    # rhy_det = RhythmDetector(video_name='whiplash.mov')
+    # rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
+    rhy_det = RhythmDetector(video_name='whiplash.mov')
     # rhy_det = RhythmDetector(video_name='BasicMotion.mov')
 
     rhy_det.analyze()
