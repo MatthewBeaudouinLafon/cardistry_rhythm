@@ -42,9 +42,6 @@ class Metric(IntEnum):
     # TODO: Make metric method s.t. you do metric.is_histogram()
     def is_histogram(self):
         """
-        Inputs:
-            metric (Metric enum)
-
         Ouput (bool):
             Whether given metric is a histogram
         """
@@ -52,9 +49,6 @@ class Metric(IntEnum):
 
     def is_vector(self):
         """
-        Inputs:
-            metric (Metric enum)
-
         Ouput (bool):
             Whether given metric is a vector
         """
@@ -62,9 +56,6 @@ class Metric(IntEnum):
 
     def is_number(self):
         """
-        Inputs:
-            metric (Metric enum)
-
         Ouput (bool):
             Whether given metric is a number
         """
@@ -97,11 +88,7 @@ class MetricManager(object):
     metric_to_string = dict([value, key] for key, value in string_to_metric.items())
 
     def __init__(self, 
-        desired_metrics = [ 
-                            ['flow_mag_distribution'],
-                            ['flow_ang_distribution'],
-                            ['mean_flow_magnitude', 'flow_percentiles', 'net_flow_mag', 'net_flow_ang']
-                          ], 
+        desired_metrics, 
         image_viz_type='color',
         percentiles=[50, 75],
         verbose=True):
@@ -187,7 +174,7 @@ class MetricManager(object):
             if metric is Metric.FLOW_PERCENTILES:
                 self.metric_data[metric] = [[] for i in self.percentiles]
             else:
-                self.metric_data[metric] = np.array([])
+                self.metric_data[metric] = []
                 
     def has_metric(self, metric):
         """
@@ -199,7 +186,7 @@ class MetricManager(object):
         """
         return metric in self.metric_data
 
-    def setup(self, source_vid_length, source_vid_size, source_vid_fps, out_vid_path, out_vid_name):
+    def setup(self, source_vid_length, source_vid_width, source_vid_height, source_vid_fps, out_vid_path, out_vid_name):
         """
         Initialize video writers and plots.
 
@@ -220,20 +207,80 @@ class MetricManager(object):
                 Name of output video.
         """
         # Setup video writers
-        self.video_in_width = int(source_vid_size[0])
-        self.video_in_height = int(source_vid_size[1])
+        full_video_path = out_vid_path + out_vid_name[:-4] +'_analysis.mov'
+        print("Writing video at: '{}'".format(full_video_path))
+        self.video_in_width = int(source_vid_width)
+        self.video_in_height = int(source_vid_height)
         plot_height = self.video_in_width  # TODO: Refactor for safety
         self.full_video_writer = cv.VideoWriter(
-            out_vid_path,
+            full_video_path,
             cv.VideoWriter.fourcc('m','p','4','v'),
             source_vid_fps,
             (self.video_in_width, self.video_in_height + plot_height)
         )  # filename, fourcc, fps, frameSize
 
-        self.image_viz = np.zeros((self.video_in_height, self.video_in_width, 3))
+        self.image_viz = np.zeros((self.video_in_height, self.video_in_width, 3), dtype='uint8')
         self.image_viz[...,1] = 255
 
         self.setup_plots(source_vid_length)
+            
+    def setup_plots(self, source_vid_length):
+        plt.ion()
+        self.fig, self.subplots = \
+            plt.subplots(nrows=len(self.metric_structure), ncols=1, figsize=(5,5))
+
+        # TODO: Deal with duplicate metrics elegantly
+        color_counter = 0  # used for legend coloring
+
+        for index, metric_group in enumerate(self.metric_structure):
+            axes = self.subplots[index]
+
+            if metric_group[0].is_histogram():
+                metric = metric_group[0]
+                axes.set_ylabel('Frequency')
+                axes.set_ylim(10, 60000)
+
+                # TODO: Maybe generalize this into a metric_to_plot_descriptors dict
+                if metric is Metric.FLOW_MAG_DISTRIBUTION:
+                    axes.set_xlabel('Motion Magnitude (pixels)')
+                    axes.set_xlim(0, 100)
+                elif metric is Metric.DFLOW_MAG_DISTRIBUTION:
+                    axes.set_xlabel('Motion Derivative Magnitude (pixels/frame)')
+                    axes.set_xlim(0, 100)
+                elif metric is Metric.FLOW_ANG_DISTRIBUTION:
+                    axes.set_xlabel('Motion Angle (radians)')
+                    axes.set_xlim(0, 2*np.pi)
+                elif metric is Metric.DFLOW_ANG_DISTRIBUTION:
+                    axes.set_xlabel('Motion Derivative Angle (radians/frame)')
+                    axes.set_xlim(0, 2*np.pi)
+                else:
+                    raise Exception("Histogram plot labels not found")
+
+            else:
+                # metric plot
+                # TODO: Make more descriptive ylabel if there's only one metric.
+                axes.set_xlabel('time (frames)')
+                axes.set_ylabel('metric')
+                axes.set_xlim(0, source_vid_length)  # TODO: no magic numbers
+                axes.set_ylim(0, 6.5)
+
+                for metric in metric_group:
+                    if metric is Metric.FLOW_PERCENTILES:
+                        for index, percent in enumerate(self.percentiles):
+                            axes.plot(
+                                [],
+                                label='{}th percentile'.format(percent), 
+                                color='C{}'.format(color_counter)  # Make all percentile lines a different color
+                            )
+                            color_counter += 1
+                    else:
+                        axes.plot([], label=MetricManager.metric_to_string[metric], color='C{}'.format(color_counter))
+                        color_counter += 1
+
+        self.fig.legend(loc='lower center', ncol=2)
+        self.fig.tight_layout()
+        self.fig.subplots_adjust(bottom=0.25)
+        self.fig.canvas.draw()
         
     def compute_metrics(self, flow, dflow=None ):
         """
@@ -247,7 +294,7 @@ class MetricManager(object):
         """
         console_output = '\n'
         
-        mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
+        mag, _ = cv.cartToPolar(flow[...,0], flow[...,1])
         flat_mag = mag.flatten()
 
         # Average the flow vectors
@@ -288,64 +335,6 @@ class MetricManager(object):
         if self.verbose:
             # Build the string to print once so the console doesn't go nuts
             print(console_output)
-            
-    def setup_plots(self, source_vid_length):
-        plt.ion()
-        self.fig, self.subplots = \
-            plt.subplots(nrows=len(self.metric_structure), ncols=1, figsize=(5,5))
-
-        # TODO: Deal with duplicate metrics elegantly
-        color_counter = 0  # used for legend coloring
-
-        for index, metric_group in enumerate(self.metric_structure):
-            axes = self.subplots[index]
-
-            if metric_group[0].is_histogram():
-                metric = metric_group[0]
-                axes.set_ylabel('Frequency')
-                axes.set_ylim(10, 60000)
-
-                # TODO: Maybe generalize this into a metric_to_plot_descriptors dict
-                if metric is Metric.FLOW_MAG_DISTRIBUTION:
-                    axes.set_xlabel('Motion Magnitude (pixels)')
-                    axes.set_xlim(0, 100)
-                elif metric is Metric.DFLOW_MAG_DISTRIBUTION:
-                    axes.set_xlabel('Motion Derivative Magnitude (pixels/frame)')
-                    axes.set_xlim(0, 100)
-                elif metric is Metric.FLOW_ANG_DISTRIBUTION:
-                    axes.set_xlabel('Motion Angle (radians)')
-                    axes.set_xlim(0, 2*np.pi)
-                elif metric is Metric.DFLOW_ANG_DISTRIBUTION:
-                    axes.set_xlabel('Motion Derivative Angle (radians/frame)')
-                    axes.set_xlim(0, 2*np.pi)
-                else:
-                    raise Exception("Histogram plot labels not found")
-
-            else:
-                # metric plot
-                # TODO: Make more descriptive ylabel if there's only one metric.
-                axes.set_xlabel('time (frames)')
-                axes.set_ylabel('metric')
-                axes.set_xlim(0, source_vid_length)  # TODO: no magic numbers
-                axes.set_ylim(10, 60000)
-
-                for metric in metric_group:
-                    if metric is Metric.FLOW_PERCENTILES:
-                        for index, percent in enumerate(self.percentiles):
-                            axes.plot(
-                                [],
-                                label='{}th percentile'.format(percent), 
-                                color='C{}'.format(color_counter)  # Make all percentile lines a different color
-                            )
-                            color_counter += 1
-                    else:
-                        axes.plot([], label=MetricManager.metric_to_string[metric], color='C{}'.format(color_counter))
-                        color_counter += 1
-
-        self.fig.legend(loc='lower center', ncol=2)
-        self.fig.tight_layout()
-        self.fig.subplots_adjust(bottom=0.25)
-        self.fig.canvas.draw()
 
     def clear_plots(self):
         """
@@ -360,18 +349,20 @@ class MetricManager(object):
         Plot metrics.
         NOTE: For the colors to work out, the for-loop structure must be the same as
         that of setup_plots (so that color_counter increments in the same way)
-        TODO: Maybe find a way to make coloring more consisten?
+        TODO: Maybe find a way to make coloring more consistent?
         """
         
         # TODO: Deal with duplicate metrics elegantly
         color_counter = 0  # used for legend coloring
+
+        self.clear_plots()
 
         for index, metric_group in enumerate(self.metric_structure):
             axes = self.subplots[index]
 
             if metric_group[0].is_histogram():
                 assert (flow is not None), Exception('Undefined flow for plotting.')
-
+                metric = metric_group[0]
                 if metric is Metric.FLOW_MAG_DISTRIBUTION:
                     mag, _ = cv.cartToPolar(flow[...,0], flow[...,1])
                     _, _, patches = axes.hist(x=mag.flatten(), bins=30, log=True, color='C0')
@@ -468,11 +459,24 @@ class MetricManager(object):
         plot_image_array = cv.resize(plot_image_array, (self.video_in_width, self.video_in_width))
         plot_image_array = cv.cvtColor(plot_image_array, cv.COLOR_RGB2BGR)
         
-        self.full_video_writer.write(np.concatenate((video_viz, plot_image_array), axis=0))
+        full_frame = np.concatenate((video_viz, plot_image_array), axis=0)
+        self.full_video_writer.write(full_frame)
 
-    def save_plots(self):
-        # ???
-        pass
+    def clean_up(self):
+        self.full_video_writer.release()
+
+    # NOTE: Not refactoring until needed.
+    # def save_plots(self):
+    #     """
+    #     Save metric graphs in result/ folder. Includes average, 25th, 50th
+    #     and 75th percentiles.
+
+    #     Note: Deprecated for now because plots are saved with video. Code still
+    #     here just in case.
+    #     """
+    #     extent = self.ax_metrics.get_tightbbox(self.fig.canvas.renderer).transformed(self.fig.dpi_scale_trans.inverted())
+    #     self.fig.savefig('result/' + self.video_name[:-4] + '_metrics.png', bbox_inches=extent)
+    #     # TODO: Split on '.' to ditch extention
 
     def compute_metric_summary(self):
         # TODO: Maybe compute some meta metrics like average net_vector angle.

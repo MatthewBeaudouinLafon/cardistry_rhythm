@@ -6,6 +6,8 @@ import cv2 as cv
 import matplotlib.pyplot as plt
 from matplotlib.transforms import Bbox
 
+from MetricManager import MetricManager
+
 # IDEAS: 
 # - Analyze motion by subtracting average flow to each flow vector.
 # Removes overall movement and makes unique movement pop out in viz.
@@ -33,32 +35,38 @@ class RhythmDetector(object):
         self.video_path = video_folder_path + video_name  # TODO: use proper python path merging
         self.percentiles = [50, 75]
 
+        self.metrics = None  # MetricManager instance
+
         self.total_frames = None
         self.current_frame = 0
 
-        plt.ion()
+        # plt.ion()
         # TODO: Make figure size the same aspect ratio as the video?
-        self.fig, (self.ax_mag_distribution, self.ax_ang_distribution, self.ax_metrics) = \
-            plt.subplots(nrows=3, ncols=1, figsize=(5,5))
-        self.plot_lines = []  # Used to store plot lines so that they can be cleared on redraw. 
-        self.metrics = {}
-        # when computed, depending on what's passed:
-        # {
-        #     'magnitude_average': [],
-        #     'magnitude_percentiles': [[] for i in self.percentiles],
-        #     ...
-        # }
+        # self.fig, (self.ax_mag_distribution, self.ax_ang_distribution, self.ax_metrics) = \
+        #     plt.subplots(nrows=3, ncols=1, figsize=(5,5))
+        # self.plot_lines = []  # Used to store plot lines so that they can be cleared on redraw. 
+        # self.metrics = {}
+        # # when computed, depending on what's passed:
+        # # {
+        # #     'magnitude_average': [],
+        # #     'magnitude_percentiles': [[] for i in self.percentiles],
+        # #     ...
+        # # }
 
-    def has_computed_metric(self, metric_name):
-        """
-        Returns whether a metric has been computed.
-        TODO: Use for input safety's sake.
-        """
-        return self.metrics.get(metric_name, None) is not None
+    # def has_computed_metric(self, metric_name):
+    #     """
+    #     Returns whether a metric has been computed.
+    #     TODO: Use for input safety's sake.
+    #     """
+    #     return self.metrics.get(metric_name, None) is not None
 
     def analyze(self,
         method='dense_optical_flow',
-        chosen_metrics=['all'],
+        chosen_metrics = [ 
+                            ['flow_mag_distribution'],
+                            ['flow_ang_distribution'],
+                            ['mean_flow_magnitude', 'flow_percentiles', 'net_flow_mag', 'net_flow_ang']
+                          ],
         show_viz=True,  # TODO: Rethink what these options should be.
         save_all=True,
         verbose=True):
@@ -70,7 +78,9 @@ class RhythmDetector(object):
                 one of 'dense_optical_flow'
             
             chosen_metrics ([string]):
-                array of strings featuring 'magnitude_percentiles', 'magnitude_average'  # TODO: Update after plot class refactor
+                Nested list of metrics. Inner list represents metrics in a subplot.
+                A histogram takes a whole subplot.
+                Note: You can only have *three* subplots.
             
             show_viz (bool):
                 Show visualizations while running
@@ -81,6 +91,7 @@ class RhythmDetector(object):
             save_all (bool):
                 Save metrics, plots, and viz if enabled. 
         """
+        print("Analyzing '{}'".format(self.video_name))
         # Choose method
         if method == 'dense_optical_flow':
             print("Analyzing using Optical Flow")
@@ -89,29 +100,43 @@ class RhythmDetector(object):
             print('Method "{}" unknown.'.format(method))
             return
 
-        # Setup Open CV
+        self.metrics = MetricManager(desired_metrics=chosen_metrics)
+
+        # # Setup Open CV
         cap = cv.VideoCapture(self.video_path)
         _, frame = cap.read()
         previous_bw = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
-        hsv = np.zeros_like(frame)
-        hsv[...,1] = 255
+        # hsv = np.zeros_like(frame)
+        # hsv[...,1] = 255
         self.total_frame_number = cap.get(cv.CAP_PROP_FRAME_COUNT)
 
-        # Setup video writers
-        if save_all:
-            vid_width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
-            vid_height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
-            plot_height = vid_width  # TODO: Refactor for safety
-            full_video_out = cv.VideoWriter(
-                'result/' + self.video_name[:-4] +'_analysis.mov',  # TODO: Better path join
-                cv.VideoWriter.fourcc('m','p','4','v'),
-                cap.get(cv.CAP_PROP_FPS),
-                (vid_width, vid_height + plot_height)
-            )  # filename, fourcc, fps, frameSize
+        vid_width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
+        vid_height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
 
-        # Setup plots
-        if len(chosen_metrics) > 0: # TODO: Good?
-            self.setup_plots()
+        self.metrics.setup(
+            source_vid_length=self.total_frame_number,
+            source_vid_width=vid_width,
+            source_vid_height=vid_height,
+            source_vid_fps=cap.get(cv.CAP_PROP_FPS),
+            out_vid_path='result/',
+            out_vid_name=self.video_name
+        )
+
+        # # Setup video writers
+        # if save_all:
+        #     vid_width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
+        #     vid_height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
+        #     plot_height = vid_width  # TODO: Refactor for safety
+        #     full_video_out = cv.VideoWriter(
+        #         'result/' + self.video_name[:-4] +'_analysis.mov',  # TODO: Better path join
+        #         cv.VideoWriter.fourcc('m','p','4','v'),
+        #         cap.get(cv.CAP_PROP_FPS),
+        #         (vid_width, vid_height + plot_height)
+        #     )  # filename, fourcc, fps, frameSize
+
+        # # Setup plots
+        # if len(chosen_metrics) > 0: # TODO: Good?
+        #     self.setup_plots()
 
         while(True):  # frame goes None when video stops
             # Read Frame
@@ -127,45 +152,47 @@ class RhythmDetector(object):
             flow = calculate_flow(previous_bw, current_bw)
 
             # Compute Metrics
-            self.compute_metric(flow, chosen_metrics, verbose=verbose)
+            # self.compute_metric(flow, chosen_metrics, verbose=verbose)
+            self.metrics.compute_metrics(flow)
 
             if show_viz:
+                # # Make color viz in another window. Flow magnitude is hsv value, angle is hue.
+                # mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
+                # hsv[...,0] = ang*180/np.pi/2
+                # hsv[...,2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)
+                # viz_image = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
+
                 # Plot metrics
-                self.plot_metrics(chosen_metrics, flow=flow)
+                # self.plot_metrics(chosen_metrics, flow=flow)
+                self.metrics.plot_metrics(flow)
 
-                # Make color viz in another window. Flow magnitude is hsv value, angle is hue.
-                mag, ang = cv.cartToPolar(flow[...,0], flow[...,1])
-                hsv[...,0] = ang*180/np.pi/2
-                hsv[...,2] = cv.normalize(mag, None, 0, 255, cv.NORM_MINMAX)
-                viz_image = cv.cvtColor(hsv,cv.COLOR_HSV2BGR)
+                # if 'net_vector' in chosen_metrics or 'all' in chosen_metrics:
+                #     net_vector = self.metrics['net_vector'][-1]
+                #     net_vector_mag, net_vector_ang = cv.cartToPolar(float(net_vector[0]), float(net_vector[1]))
 
-                if 'net_vector' in chosen_metrics or 'all' in chosen_metrics:
-                    net_vector = self.metrics['net_vector'][-1]
-                    net_vector_mag, net_vector_ang = cv.cartToPolar(float(net_vector[0]), float(net_vector[1]))
-
-                    # Draw magnitude and angle vizualizer
-                    diagram_center = (70,70)
-                    arrow_length = 50
-                    disp_angle = net_vector_ang[0]  # Why does cartToPolar spit out [value, 0, 0, 0]? Beats me.
-                    arrow_head = (int(diagram_center[0] + arrow_length * math.cos(disp_angle)), int(diagram_center[1] + arrow_length * math.sin(disp_angle)))
-                    cv.circle(img=viz_image, center=diagram_center, radius=int(100*net_vector_mag[0]),color=(0, 0, 255),thickness=-1)            
-                    cv.arrowedLine(viz_image, diagram_center, arrow_head, thickness=2, color=(255,255,255))
+                #     # Draw magnitude and angle vizualizer
+                #     diagram_center = (70,70)
+                #     arrow_length = 50
+                #     disp_angle = net_vector_ang[0]  # Why does cartToPolar spit out [value, 0, 0, 0]? Beats me.
+                #     arrow_head = (int(diagram_center[0] + arrow_length * math.cos(disp_angle)), int(diagram_center[1] + arrow_length * math.sin(disp_angle)))
+                #     cv.circle(img=viz_image, center=diagram_center, radius=int(100*net_vector_mag[0]),color=(0, 0, 255),thickness=-1)            
+                #     cv.arrowedLine(viz_image, diagram_center, arrow_head, thickness=2, color=(255,255,255))
 
                 # Show frame in one window
                 cv.imshow('frame', frame)
-                cv.imshow('flow', viz_image)
+                # cv.imshow('flow', viz_image)
 
+                # self.metrics.save_plots()
+                # if save_all:
+                #     # Convert plot image to np array to save with opencv TODO: wtf is this seriously the best way to do this  
+                #     plot_image_array = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+                #     plot_image_array = plot_image_array.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
 
-                if save_all:
-                    # Convert plot image to np array to save with opencv TODO: wtf is this seriously the best way to do this  
-                    plot_image_array = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
-                    plot_image_array = plot_image_array.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
-
-                    # Resize the raster image of the plot *gag* TODO: Do this in a gag-less way. 
-                    plot_image_array = cv.resize(plot_image_array, (vid_width, vid_width))
-                    plot_image_array = cv.cvtColor(plot_image_array, cv.COLOR_RGB2BGR)
-                    
-                    full_video_out.write(np.concatenate((viz_image, plot_image_array), axis=0))
+                #     # Resize the raster image of the plot *gag* TODO: Do this in a gag-less way. 
+                #     plot_image_array = cv.resize(plot_image_array, (vid_width, vid_width))
+                #     plot_image_array = cv.cvtColor(plot_image_array, cv.COLOR_RGB2BGR)
+                #     full_frame = np.concatenate((frame, plot_image_array), axis=0)
+                #     full_video_out.write(np.concatenate((viz_image, plot_image_array), axis=0))
 
             # Interpret keyboard
             k = cv.waitKey(30) & 0xff
@@ -174,12 +201,15 @@ class RhythmDetector(object):
                 break
             elif k == ord('s'):
                 cv.imwrite('opticalfb.png', frame)
-                cv.imwrite('opticalhsv.png', viz_image)
+                # cv.imwrite('opticalhsv.png', viz_image)
 
             previous_bw = current_bw
 
-        if save_all:
-            self.save_final_plots()  # TODO: Check if plots exist?
+        self.metrics.clean_up()
+
+        # if save_all:
+        #     self.save_final_plots()  # TODO: Check if plots exist?
+        # self.metrics.save_plots(video_name)
 
         cap.release()
         cv.destroyAllWindows()
@@ -445,9 +475,9 @@ if __name__ == "__main__":
     # TODO: Make result/ and metrics/ folder if they don't exist.
 
     start = time.time()
-    # rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
+    rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
     # rhy_det = RhythmDetector(video_name='whiplash.mov')
-    rhy_det = RhythmDetector(video_name='BasicMotion.mov')
+    # rhy_det = RhythmDetector(video_name='BasicMotion.mov')
 
     rhy_det.analyze()
     print("Took {}seconds".format(time.time() - start))
