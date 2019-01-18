@@ -1,7 +1,3 @@
-# Video folder
-video/*
-result/*
-
 # Dumb local stuff
 .DS_Store
 .vscode/
