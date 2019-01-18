@@ -1,3 +1,4 @@
+import os
 import math
 import time
 from enum import Enum
@@ -80,7 +81,7 @@ class RhythmDetector(object):
             print('Method "{}" unknown.'.format(method))
             return
 
-        self.metrics = MetricManager(desired_metrics=chosen_metrics, image_viz_type='mask')
+        self.metrics = MetricManager(desired_metrics=chosen_metrics)
 
         # Setup Open CV
         cap = cv.VideoCapture(self.video_path)
@@ -158,6 +159,7 @@ class RhythmDetector(object):
 
     def dense_optical_flow(self, previous_frame, current_frame):
         # TODO: Make static/refactor out?
+        #                                                                       Literally magic numbers taken from tutorial
         return cv.calcOpticalFlowFarneback(previous_frame, current_frame, None, 0.5, 3, 15, 3, 5, 1.2, 0)
 
     def lk_optical_flow(self):
