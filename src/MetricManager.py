@@ -288,6 +288,7 @@ class MetricManager(object):
 
         TODO: Replace lists with numpy arrays. Initialize to have number of
         frames length of zeros, index with current frame. 
+        TODO: Computing image viz might make more sense here?
         TODO: Try doing a second derivative like thing by taking the difference
         between the current and the previous flow. This would show those sharp
         corners that function as beats.
@@ -351,7 +352,7 @@ class MetricManager(object):
             line.remove()
         self.plot_lines.clear()
 
-    def plot_metrics(self, flow, dflow=None):
+    def plot_metrics(self, flow, frame, dflow=None):
         """
         Plot metrics.
         NOTE: For the colors to work out, the for-loop structure must be the same as
@@ -412,10 +413,10 @@ class MetricManager(object):
                         )
                         color_counter += 1
         
-        viz_output = self.make_image_viz(flow)
+        viz_output = self.make_image_viz(flow, frame)
         self.write_full_frame(viz_output, self.fig)
 
-    def make_image_viz(self, flow):
+    def make_image_viz(self, flow, frame):
         """
         Generate and display flow visualization.
 
@@ -447,7 +448,19 @@ class MetricManager(object):
                 cv.arrowedLine(viz_output, diagram_center, arrow_head, thickness=2, color=(255,255,255))
 
         elif self.image_viz_type == 'mask':
-            raise Exception("Mask image viz not implemented")  # TODO: Implement
+            lower_cutoff = 5
+            upper_cutoff = 30
+            assert lower_cutoff < upper_cutoff, Exception("Lower mask cutoff should be lower than the upper one, idiot.")
+
+            mag, _ = cv.cartToPolar(flow[...,0], flow[...,1])
+            mask = np.clip(mag, lower_cutoff, upper_cutoff)
+            mask = (mask - lower_cutoff) / (upper_cutoff - lower_cutoff)
+
+            hsv_frame = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
+            hsv_frame[...,2] = hsv_frame[...,2] * mask
+
+            viz_output = cv.cvtColor(hsv_frame, cv.COLOR_HSV2BGR)
+            # raise Exception("Mask image viz not implemented")  # TODO: Implement
         else:
             raise Exception('"{}" is not a valid image vizualization.'.format(self.image_viz_type))
 

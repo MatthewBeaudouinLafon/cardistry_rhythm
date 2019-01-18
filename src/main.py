@@ -80,7 +80,7 @@ class RhythmDetector(object):
             print('Method "{}" unknown.'.format(method))
             return
 
-        self.metrics = MetricManager(desired_metrics=chosen_metrics)
+        self.metrics = MetricManager(desired_metrics=chosen_metrics, image_viz_type='mask')
 
         # Setup Open CV
         cap = cv.VideoCapture(self.video_path)
@@ -118,7 +118,7 @@ class RhythmDetector(object):
             self.metrics.compute_metrics(flow)
 
             if show_viz:
-                self.metrics.plot_metrics(flow)
+                self.metrics.plot_metrics(flow, frame)
 
                 # Show frame in one window
                 cv.imshow('frame', frame)
@@ -230,8 +230,8 @@ if __name__ == "__main__":
     # TODO: Make result/ and metrics/ folder if they don't exist.
 
     start = time.time()
-    # rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
-    rhy_det = RhythmDetector(video_name='whiplash.mov')
+    rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
+    # rhy_det = RhythmDetector(video_name='whiplash.mov')
     # rhy_det = RhythmDetector(video_name='BasicMotion.mov')
 
     rhy_det.analyze()
