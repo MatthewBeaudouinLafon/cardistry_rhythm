@@ -33,7 +33,7 @@ class RhythmDetector(object):
 
     def __init__(self, video_name, video_folder_path='video/'):
         self.video_name = video_name
-        self.video_path = video_folder_path + video_name  # TODO: use proper python path merging
+        self.video_path = os.path.join('video/', video_name)
         self.percentiles = [50, 75]
 
         self.metrics = None  # MetricManager instance
@@ -144,7 +144,7 @@ class RhythmDetector(object):
         cap = cv.VideoCapture(self.video_path)
 
         while(cap.isOpened()):
-            ret, frame = cap.read()
+            _, frame = cap.read()
             
             if frame is None:
                 print("end of video")
@@ -185,7 +185,7 @@ class RhythmDetector(object):
         color = np.random.randint(0,255,(100,3))
 
         # Take first frame and find corners in it
-        ret, old_frame = cap.read()
+        _, old_frame = cap.read()
         old_gray = cv.cvtColor(old_frame, cv.COLOR_BGR2GRAY)
         p0 = cv.goodFeaturesToTrack(old_gray, mask = None, **feature_params)
 
@@ -193,7 +193,7 @@ class RhythmDetector(object):
         mask = np.zeros_like(old_frame)
 
         while(1):
-            ret,frame = cap.read()
+            _, frame = cap.read()
 
             if frame is None:
                 print("end of video")
@@ -202,7 +202,7 @@ class RhythmDetector(object):
             frame_gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
             # calculate optical flow
-            p1, st, err = cv.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
+            p1, st, _ = cv.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
 
             # Select good points
             good_new = p1[st==1]
@@ -229,12 +229,28 @@ class RhythmDetector(object):
 
 
 if __name__ == "__main__":
-    # TODO: Make result/ and metrics/ folder if they don't exist.
+    import sys
 
-    start = time.time()
     rhy_det = RhythmDetector(video_name='AutoPortrait.mov')
     # rhy_det = RhythmDetector(video_name='whiplash.mov')
     # rhy_det = RhythmDetector(video_name='BasicMotion.mov')
+    
+    assert len(sys.argv) <= 2, Exception('Too many arguments.')
+
+    if len(sys.argv) == 1:
+        # Default for debugging purposes.
+        video_name = 'AutoPortrait.mov'
+        # video_name = 'whiplash.mov'
+        # video_name = 'BasicMotion.mov'
+    else:
+        video_name = sys.argv[1]
+    
+    video_path = os.path.join('video/', video_name)
+
+    assert os.path.isfile(video_path), Exception('"{}" not found.')
+
+    start = time.time()
+    rhy_det = RhythmDetector(video_name=video_name)
 
     rhy_det.analyze()
     print("Took {}seconds".format(time.time() - start))
