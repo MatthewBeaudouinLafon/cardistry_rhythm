@@ -247,7 +247,11 @@ if __name__ == "__main__":
     
     video_path = os.path.join('video/', video_name)
 
-    assert os.path.isfile(video_path), Exception('"{}" not found.')
+    if video_name == 'your_video_name.mov':
+        assert os.path.isfile(video_path), Exception('"{}" not found. Did you replace "your_video_name.mov" with the file name of your video?')
+    else:
+        assert os.path.isfile(video_path), Exception('"{}" not found.')
+
 
     start = time.time()
     rhy_det = RhythmDetector(video_name=video_name)
